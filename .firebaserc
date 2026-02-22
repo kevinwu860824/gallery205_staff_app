@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "gallery205-staff-app"
+  },
+  "targets": {},
+  "etags": {
+    "gallery205-staff-app": {
+      "extensionInstances": {}
+    }
+  },
+  "dataconnectEmulatorConfig": {}
+}
