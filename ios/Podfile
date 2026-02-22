@@ -1,0 +1,74 @@
+# ✅ 1. 強制指定 iOS 平台版本為 15.0 (確保沒有 # 註解符號)
+platform :ios, '16.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+# ✅ 2. 強制所有第三方套件升級到 iOS 15.0
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+
+    target.build_configurations.each do |config|
+      # 統一部署版本
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'NO'
+
+      # 要清除的 flags key
+      flag_keys = [
+        'OTHER_CFLAGS',
+        'OTHER_CPLUSPLUSFLAGS',
+        'GCC_PREPROCESSOR_DEFINITIONS',
+        'EXPORTED_TARGET_FLAGS',
+        'COMPILER_FLAGS',
+        'OTHER_LDFLAGS'
+      ]
+
+      flag_keys.each do |key|
+        flags = config.build_settings[key]
+        next unless flags
+
+        if flags.is_a?(String)
+          config.build_settings[key] =
+            flags.split(' ').reject { |f| f.start_with?('-G') }.join(' ')
+        elsif flags.is_a?(Array)
+          config.build_settings[key] =
+            flags.reject { |f| f.start_with?('-G') }
+        end
+      end
+    end
+  end
+end
