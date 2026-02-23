@@ -51,6 +51,3 @@ ios/*.zip
 ios/Runner.app.dSYM.zip
 ios/Runner.ipa
 
-# Firebase config files
-**/ios/Runner/GoogleService-Info.plist
-**/android/app/google-services.json

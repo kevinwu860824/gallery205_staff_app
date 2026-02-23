@@ -18,6 +18,11 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
   bool isLoading = true;
   TaxProfile? taxProfile;
   late OrderingRepository _repository;
+  
+  // Local state for the selected values before saving
+  double _selectedRate = 0.0;
+  bool _selectedIsIncluded = true;
+  String? shopId;
 
   @override
   void initState() {
@@ -41,8 +46,13 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
     
     try {
       final profile = await _repository.getTaxProfile();
+      final prefs = await SharedPreferences.getInstance();
+      shopId = prefs.getString('savedShopId');
+      
       setState(() {
         taxProfile = profile;
+        _selectedRate = profile.rate;
+        _selectedIsIncluded = profile.isTaxIncluded;
         isLoading = false;
       });
     } catch (e) {
@@ -54,14 +64,48 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
     }
   }
 
-  Future<void> _saveSettings(double newRate, bool newInclude) async {
+  Future<void> _saveSettings() async {
     if (taxProfile == null) return;
+    
+    // Verifying ezPay configuration if selecting 5% Tax
+    if (_selectedRate == 5.0 && shopId != null) {
+      setState(() => isLoading = true);
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final String? token = prefs.getString('supabase_session_token') ?? Supabase.instance.client.auth.currentSession?.accessToken;
+        
+        // Use the existing Next.js admin web API which securely tests the AES encryption
+        // Requires knowing the backend URL, assuming standard dev/prod setup for mobile app
+        // We will hit the admin web URL, typically defined in env or a constant. 
+        // For standard local dev / prod, we'll try a generic fetch via a helper if it exists,
+        // or just construct it.
+        // ACTUALLY, the staff app might not know the admin web URL directly.
+        // A better fallback since Edge Function failed is to put the validation logic in a 
+        // Supabase RPC (database function) that just checks if the row exists and is not null.
+        
+        final client = Supabase.instance.client;
+        final res = await client
+            .from('shop_ezpay_settings')
+            .select('merchant_id, hash_key, hash_iv')
+            .eq('shop_id', shopId!)
+            .maybeSingle();
+
+        if (res == null || res['merchant_id'] == null || res['hash_key'] == null || res['hash_iv'] == null) {
+          throw "無法連線至電子發票服務，請至網頁版管理後台完成 ezPay 金鑰設定後再試。";
+        }
+        
+      } catch (e) {
+        if (mounted) setState(() => isLoading = false);
+        _showErrorDialog(e.toString());
+        return; // Block saving
+      }
+    }
     
     setState(() => isLoading = true);
     try {
       final newProfile = taxProfile!.copyWith(
-        rate: newRate,
-        isTaxIncluded: newInclude,
+        rate: _selectedRate,
+        isTaxIncluded: _selectedIsIncluded,
       );
       
       await _repository.saveTaxProfile(newProfile);
@@ -77,6 +121,22 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  void _showErrorDialog(String msg) {
+    showCupertinoDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("設定失敗", style: TextStyle(color: Colors.red)),
+        content: Text(msg.replaceAll("Exception: ", "").replaceAll("EdgeFunctionException: ", "")),
+        actions: [
+          TextButton(
+             onPressed: () => Navigator.pop(ctx),
+             child: const Text("我知道了")
+          )
+        ],
+      )
+    );
   }
 
   @override
@@ -105,22 +165,22 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
                       RadioListTile<double>(
                         title: const Text("免稅 (0%)"),
                         value: 0.0,
-                        groupValue: taxProfile?.rate,
-                        onChanged: (val) => _saveSettings(val!, taxProfile?.isTaxIncluded ?? true),
+                        groupValue: _selectedRate,
+                        onChanged: (val) => setState(() => _selectedRate = val!),
                       ),
                       const Divider(height: 1),
                       RadioListTile<double>(
                         title: const Text("核定課稅 (1%)"),
                         value: 1.0,
-                        groupValue: taxProfile?.rate,
-                        onChanged: (val) => _saveSettings(val!, taxProfile?.isTaxIncluded ?? true),
+                        groupValue: _selectedRate,
+                        onChanged: (val) => setState(() => _selectedRate = val!),
                       ),
                       const Divider(height: 1),
                       RadioListTile<double>(
                         title: const Text("統一發票 (5%)"),
                         value: 5.0,
-                        groupValue: taxProfile?.rate,
-                        onChanged: (val) => _saveSettings(val!, taxProfile?.isTaxIncluded ?? true),
+                        groupValue: _selectedRate,
+                        onChanged: (val) => setState(() => _selectedRate = val!),
                       ),
                     ],
                   ),
@@ -138,8 +198,8 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
                        SwitchListTile.adaptive(
                          title: const Text("稅額內含"),
                          subtitle: const Text("商品價格已包含稅金"),
-                         value: taxProfile?.isTaxIncluded ?? true,
-                         onChanged: (val) => _saveSettings(taxProfile?.rate ?? 0, val),
+                         value: _selectedIsIncluded,
+                         onChanged: (val) => setState(() => _selectedIsIncluded = val),
                        ),
                     ],
                   ),
@@ -150,6 +210,21 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
                   child: Text(
                     "說明：\n• 內含：商品 \$100，稅率 5%，則 銷售額 \$95 + 稅 \$5。\n• 外加：商品 \$100，稅率 5%，則 總金額 \$105 (銷售額 \$100 + 稅 \$5)。",
                     style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Save Button
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saveSettings,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                    ),
+                    child: const Text("儲存設定", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 )
               ],

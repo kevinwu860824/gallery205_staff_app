@@ -11,7 +11,9 @@ import 'package:gallery205_staff_app/features/ordering/domain/logic/order_calcul
 import 'package:gallery205_staff_app/core/models/tax_profile.dart';
 import 'package:gallery205_staff_app/core/services/printer_service.dart'; // NEW
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_context.dart'; // NEW
-import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart'; // NEW
+import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter/services.dart'; // NEW
 
 class PaymentScreen extends ConsumerStatefulWidget {
   final String groupKey;
@@ -45,9 +47,88 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final TextEditingController refController = TextEditingController(); // For Last 4
   
   // Invoice Information
-  String selectedCarrierType = 'none'; // 'none', '0' (Mobile), '1' (Citizen), '2' (ezPay)
   final TextEditingController carrierNumController = TextEditingController();
   final TextEditingController ubnController = TextEditingController();
+
+  // Exclusivity Check
+  void _onUbnChanged() {
+    if (ubnController.text.length == 8 && carrierNumController.text.isNotEmpty) {
+      _handleMutualExclusivity(fromUbn: true);
+    }
+  }
+
+  Future<void> _handleMutualExclusivity({required bool fromUbn}) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(fromUbn ? "已設定載具" : "已輸入統編"),
+        content: Text(fromUbn ? "您已輸入統編，要切換為統編開立（並移除載具）嗎？" : "您已掃描載具，要切換為客製載具（並移除統編）嗎？"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("保留原本")),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true), 
+            child: Text("確定切換", style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() {
+        if (fromUbn) {
+          carrierNumController.clear();
+        } else {
+          ubnController.clear();
+        }
+      });
+    } else {
+      if (fromUbn) {
+        // Re-clear UBN to keep carrier
+        ubnController.removeListener(_onUbnChanged);
+        ubnController.clear();
+        ubnController.addListener(_onUbnChanged);
+      } else {
+        // Discard scanned carrier to keep UBN
+        setState(() {
+          carrierNumController.clear();
+        });
+      }
+    }
+  }
+
+  Future<void> _scanCarrier() async {
+    // If UBN already exists, warn before scanning or after scanning? 
+    // Usually after scanning is better UX so they don't get interrupted before even seeing the camera.
+    
+    final String? result = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (c) => _CarrierScannerOverlay(),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      // Validation
+      final String upperResult = result.toUpperCase();
+      final bool isValid = RegExp(r'^\/[A-Z0-9\.\-\+]{7}$').hasMatch(upperResult);
+      
+      if (!isValid) {
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text("載具格式錯誤！應為 / 開頭且共 8 碼"))
+           );
+         }
+         return;
+      }
+
+      setState(() {
+        carrierNumController.text = upperResult;
+      });
+
+      if (ubnController.text.isNotEmpty) {
+        _handleMutualExclusivity(fromUbn: false);
+      }
+    }
+  }
+
   
   // Printing Data
   List<Map<String, dynamic>> _itemDetails = [];
@@ -63,6 +144,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   @override
   void initState() {
     super.initState();
+    ubnController.addListener(_onUbnChanged);
     _initData();
   }
   
@@ -238,6 +320,18 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       return;
     }
 
+    final ubn = ubnController.text.trim();
+    if (ubn.isNotEmpty && ubn.length != 8) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("統一編號格式不正確 (需為 8 碼)")));
+      return;
+    }
+
+    final carrierNum = carrierNumController.text.trim();
+    if (carrierNum.isNotEmpty && !RegExp(r'^\/[A-Z0-9\.\-\+]{7}$').hasMatch(carrierNum.toUpperCase())) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("手機載具格式不正確 (應為 / 開頭且共 8 碼)")));
+      return;
+    }
+
     setState(() => isLoading = true);
     final supabase = Supabase.instance.client;
     final prefs = await SharedPreferences.getInstance();
@@ -279,11 +373,16 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       // I forgot to store taxAmount as state in _loadOrderDetails.
       // I should modify _loadOrderDetails to store taxAmount in a class variable.
       
+      // REFINED TAX CALCULATION (Sync with Edge Function)
+      final int finalAmtInt = _totalAmount.toInt();
+      final int calculatedAmt = (finalAmtInt / 1.05).round();
+      final int calculatedTax = finalAmtInt - calculatedAmt;
+
       // 2. Update Order Group Status
       try {
         final ubn = ubnController.text.trim();
         final carrierNum = carrierNumController.text.trim();
-        
+
         await supabase.from('order_groups').update({
           'status': 'completed',
           'checkout_time': DateTime.now().toUtc().toIso8601String(),
@@ -291,25 +390,60 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           'final_amount': _totalAmount,
           'open_id': openId, // Link to shift
           'buyer_ubn': ubn.isNotEmpty ? ubn : null,
-          'carrier_type': selectedCarrierType != 'none' ? selectedCarrierType : null,
+          'carrier_type': carrierNum.isNotEmpty ? '0' : null, // Force '0' for mobile barcode
           'carrier_num': carrierNum.isNotEmpty ? carrierNum : null,
         }).eq('id', widget.groupKey);
       } catch (e) {
         throw "更新訂單狀態失敗: $e";
       }
       
-      // 3. Fire Payment Completed Event
+      // 3. Fire Payment Completed Event (for other listeners if any)
       final bus = ref.read(orderEventBusProvider);
-      bus.fire(PaymentCompletedEvent(
+      final event = PaymentCompletedEvent(
          orderGroupId: widget.groupKey,
          finalAmount: _totalAmount,
-         taxAmount: _taxAmount, // Will be 0 if not captured, see below
-      ));
+         taxAmount: calculatedTax.toDouble(),
+      );
+      bus.fire(event);
+
+      // 3.5. Issue Invoice (Synchronous/Blocking) if Tax is 5%
+      bool invoiceSuccess = false;
+      if (_taxProfile != null && _taxProfile!.rate == 5.0) {
+        while (!invoiceSuccess) {
+          invoiceSuccess = await ref.read(invoiceServiceProvider).onPaymentCompleted(event);
+          
+          if (!invoiceSuccess) {
+             final bool? retry = await showDialog<bool>(
+               context: context,
+               barrierDismissible: false,
+               builder: (ctx) => AlertDialog(
+                 title: const Text("發票開立失敗"),
+                 content: const Text("電子發票開立發生錯誤（可能是字軌用完或網路問題）。是否要重試？"),
+                 actions: [
+                   TextButton(
+                     onPressed: () => Navigator.pop(ctx, false), 
+                     child: const Text("不開票直接完成"),
+                   ),
+                   ElevatedButton(
+                     onPressed: () => Navigator.pop(ctx, true), 
+                     child: const Text("重試"),
+                   ),
+                 ],
+               ),
+             );
+             
+             if (retry != true) {
+               // User chose to skip
+               break;
+             }
+          }
+        }
+      }
 
       // 4. Print Receipt (Sync)
       try {
          final printerService = PrinterService();
-         // Removed redundant single() call that causes crash if multiple printers exist
+         // ... (existing printer logic)
          final allSettings = await supabase.from('printer_settings').select().eq('shop_id', shopId!);
          final printerSettings = List<Map<String, dynamic>>.from(allSettings);
 
@@ -332,7 +466,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
          
          // Tax Logic
          final bool isIncluded = _taxProfile?.isTaxIncluded ?? true;
-         final double taxToPrint = isIncluded ? 0 : _taxAmount;
+         final double taxToPrint = isIncluded ? 0 : calculatedTax.toDouble();
          final String? taxLabel = isIncluded ? null : "稅額 (${(_taxProfile?.rate ?? 0).toStringAsFixed(0)}%)";
 
          await printerService.printBill(
@@ -378,234 +512,425 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text("選擇付款方式"),
-        backgroundColor: Theme.of(context).cardColor,
+        title: const Text("選擇付款方式", style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
       ),
+      extendBodyBehindAppBar: true,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => FocusScope.of(context).unfocus(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight + 24),
+                          // 1. Top Summary
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                            child: Column(
+                              children: [
+                                Text("應付金額", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8), fontSize: 16)),
+                                const SizedBox(height: 8),
+                                Text("\$${_totalAmount.toStringAsFixed(0)}", 
+                                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 56, fontWeight: FontWeight.w600, letterSpacing: -1)
+                                ),
+                                if (!isComplete) ...[
+                                  const SizedBox(height: 8),
+                                  Text("剩餘: \$${remaining.toStringAsFixed(0)}", style: const TextStyle(color: Colors.redAccent, fontSize: 18)),
+                                ] else ...[
+                                  const SizedBox(height: 8),
+                                  Text("找零: \$${(-remaining).toStringAsFixed(0)}", style: const TextStyle(color: Colors.greenAccent, fontSize: 18)),
+                                ]
+                              ],
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 16),
+                          
+                          // 2. Added Payments List
+                          if (payments.isNotEmpty)
+                            Container(
+                              width: double.infinity,
+                              color: Colors.white.withValues(alpha: 0.05),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                              child: Column(
+                                children: payments.asMap().entries.map((entry) {
+                                  final index = entry.key;
+                                  final p = entry.value;
+                                  return Card(
+                                    color: Theme.of(context).cardColor.withValues(alpha: 0.8),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    margin: EdgeInsets.only(bottom: index == payments.length - 1 ? 0 : 8),
+                                    child: ListTile(
+                                      leading: Icon(CupertinoIcons.money_dollar_circle, color: Theme.of(context).colorScheme.primary),
+                                      title: Text("${p['method']} \$${(p['amount'] as double).toStringAsFixed(0)}"),
+                                      subtitle: (p['ref'] as String).isNotEmpty ? Text("末四碼: ${p['ref']}") : null,
+                                      trailing: IconButton(
+                                        icon: const Icon(CupertinoIcons.minus_circle, color: Colors.redAccent),
+                                        onPressed: () => _removePayment(index),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          
+                          if (payments.isEmpty)
+                            const SizedBox(height: 32),
+                        ],
+                      ),
+                      
+                      // 3. Bottom Controls Area
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // 3.1 Invoice Section
+                            if (_taxProfile != null && _taxProfile!.rate == 5.0) ...[
+                              Row(
+                                children: [
+                                  const Icon(CupertinoIcons.doc_plaintext, size: 20, color: Colors.white),
+                                  const SizedBox(width: 8),
+                                  const Text("電子發票設定", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Divider(height: 1, color: Colors.white.withValues(alpha: 0.3)),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 70,
+                                    child: const Text("統一編號", style: TextStyle(color: Colors.white, fontSize: 15))
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: ubnController,
+                                      keyboardType: TextInputType.number,
+                                      maxLength: 8,
+                                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        LengthLimitingTextInputFormatter(8),
+                                      ],
+                                      decoration: InputDecoration(
+                                        hintText: "8 碼統編 (選填)",
+                                        hintStyle: const TextStyle(color: Colors.white70),
+                                        counterText: "",
+                                        isDense: true,
+                                        filled: true,
+                                        fillColor: Colors.white.withValues(alpha: 0.15),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 70,
+                                    child: const Text("手機載具", style: TextStyle(color: Colors.white, fontSize: 15))
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: _scanCarrier,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: carrierNumController.text.isEmpty ? Colors.transparent : Colors.greenAccent.withValues(alpha: 0.8), width: 1.5),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(CupertinoIcons.camera, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                carrierNumController.text.isEmpty ? "點擊掃描手機條碼" : carrierNumController.text,
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: carrierNumController.text.isEmpty 
+                                                    ? Colors.white70
+                                                    : Colors.white,
+                                                  fontWeight: carrierNumController.text.isEmpty ? FontWeight.normal : FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            if (carrierNumController.text.isNotEmpty) ...[
+                                              const Icon(CupertinoIcons.check_mark_circled_solid, size: 18, color: Colors.greenAccent),
+                                              const SizedBox(width: 12),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  setState(() {
+                                                    carrierNumController.clear();
+                                                  });
+                                                },
+                                                child: Icon(CupertinoIcons.clear_thick_circled, size: 20, color: Colors.white.withValues(alpha: 0.5)),
+                                              ),
+                                            ]
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                            ],
+                            
+                            // 3.2 Add Payment Form
+                            if (activeInput) ...[
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: availableMethods.map((m) {
+                                      final isSelected = selectedMethod == m;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 8),
+                                        child: ChoiceChip(
+                                          label: Text(m, style: const TextStyle(fontSize: 15, color: Colors.white)),
+                                          selected: isSelected,
+                                          showCheckmark: isSelected,
+                                          checkmarkColor: Theme.of(context).colorScheme.primary,
+                                          selectedColor: Colors.transparent,
+                                          backgroundColor: Colors.transparent,
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            side: BorderSide(color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white.withValues(alpha: 0.5)),
+                                          ),
+                                          onSelected: (val) {
+                                            setState(() {
+                                               if (val) selectedMethod = m;
+                                            });
+                                          },
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: amountController,
+                                      keyboardType: TextInputType.number,
+                                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                                      decoration: InputDecoration(
+                                        labelText: "金額",
+                                        labelStyle: const TextStyle(color: Colors.white70),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Colors.white)
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Colors.white)
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: const BorderSide(color: Colors.white, width: 2)
+                                        ),
+                                        prefixText: '\$ ',
+                                        prefixStyle: const TextStyle(color: Colors.white, fontSize: 18),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                      ),
+                                    ),
+                                  ),
+                                  if (showCreditCardInput) ...[
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: refController,
+                                        keyboardType: TextInputType.number,
+                                        maxLength: 4,
+                                        style: const TextStyle(color: Colors.white, fontSize: 18),
+                                        decoration: InputDecoration(
+                                          labelText: "末四碼",
+                                          labelStyle: const TextStyle(color: Colors.white70),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Colors.white)
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Colors.white)
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: const BorderSide(color: Colors.white, width: 2)
+                                          ),
+                                          counterText: "",
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(width: 12),
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2), // Align visually with textfield height ignoring label
+                                    child: InkWell(
+                                      onTap: _addPayment,
+                                      borderRadius: BorderRadius.circular(26),
+                                      child: Container(
+                                        width: 52,
+                                        height: 52,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.white.withValues(alpha: 0.15),
+                                          border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                                        ),
+                                        child: const Icon(CupertinoIcons.add, color: Colors.white, size: 24),
+                                      ),
+                                    ),
+                                  )
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                            ],
+                            
+                            // 3.3 Final Action Button
+                            SizedBox(
+                              height: 56,
+                              child: ElevatedButton(
+                                onPressed: isComplete && !isLoading ? _processPayment : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white.withValues(alpha: 0.2), 
+                                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                                  disabledBackgroundColor: Colors.white.withValues(alpha: 0.05),
+                                  disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                                  elevation: 0,
+                                ),
+                                child: const Text("完成結帳", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+        ),
+      ),
+    );
+    }
+    
+    bool get activeInput => _remaining > 0;
+  }
+
+class _CarrierScannerOverlay extends StatefulWidget {
+  @override
+  State<_CarrierScannerOverlay> createState() => _CarrierScannerOverlayState();
+}
+
+class _CarrierScannerOverlayState extends State<_CarrierScannerOverlay> {
+  final MobileScannerController controller = MobileScannerController(
+    formats: [BarcodeFormat.qrCode, BarcodeFormat.code39, BarcodeFormat.code128],
+  );
+
+  bool _hasScanned = false;
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double size = MediaQuery.of(context).size.width * 0.7;
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         child: Column(
           children: [
-            // 1. Top Summary
-            Container(
-              padding: const EdgeInsets.all(24),
-              color: Theme.of(context).cardColor,
-              child: Column(
+            const SizedBox(height: 12),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.24), borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("應付金額", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16)),
-                  const SizedBox(height: 8),
-                  Text("\$${_totalAmount.toStringAsFixed(0)}", 
-                    style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 40, fontWeight: FontWeight.bold)
+                  Text("掃描載具條碼", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: Icon(CupertinoIcons.xmark_circle_fill, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.54), size: 28),
+                    onPressed: () => Navigator.pop(context),
                   ),
-                  if (!isComplete) ...[
-                    const SizedBox(height: 8),
-                    Text("剩餘: \$${remaining.toStringAsFixed(0)}", style: const TextStyle(color: Colors.red, fontSize: 18)),
-                  ] else ...[
-                    const SizedBox(height: 8),
-                    Text("找零: \$${(-remaining).toStringAsFixed(0)}", style: const TextStyle(color: Colors.green, fontSize: 18)),
-                  ]
                 ],
               ),
             ),
-            
-            const SizedBox(height: 16),
-            
-            // 2. Added Payments List
             Expanded(
-              child: ListView.builder(
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: payments.length,
-                itemBuilder: (context, index) {
-                  final p = payments[index];
-                  return Card(
-                    color: Theme.of(context).cardColor,
-                    child: ListTile(
-                      leading: Icon(CupertinoIcons.money_dollar_circle, color: Theme.of(context).colorScheme.primary),
-                      title: Text("${p['method']} \$${(p['amount'] as double).toStringAsFixed(0)}"),
-                      subtitle: (p['ref'] as String).isNotEmpty ? Text("末四碼: ${p['ref']}") : null,
-                      trailing: IconButton(
-                        icon: const Icon(CupertinoIcons.minus_circle, color: Colors.red),
-                        onPressed: () => _removePayment(index),
-                      ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  MobileScanner(
+                    controller: controller,
+                    onDetect: (capture) {
+                      if (_hasScanned) return;
+                      final List<Barcode> barcodes = capture.barcodes;
+                      if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                        _hasScanned = true;
+                        Navigator.pop(context, barcodes.first.rawValue);
+                      }
+                    },
+                  ),
+                  // Finder Overlay
+                  Container(
+                    width: size,
+                    height: size * 0.4,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).colorScheme.primary, width: 2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  );
-                },
+                  ),
+                  Positioned(
+                    bottom: 40,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                      child: const Text("將載具條碼置於框內", style: TextStyle(color: Colors.white, fontSize: 13)),
+                    ),
+                  ),
+                ],
               ),
             ),
-            
-            // 3. Add Payment Form
-            if (activeInput)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]
-              ),
-              child: SafeArea(
-                 top: false,
-                 child: Column(
-                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                   children: [
-                     // Method Selection
-                     SingleChildScrollView(
-                       scrollDirection: Axis.horizontal,
-                       child: Row(
-                         children: availableMethods.map((m) {
-                           final isSelected = selectedMethod == m;
-                           return Padding(
-                             padding: const EdgeInsets.only(right: 8),
-                             child: ChoiceChip(
-                               label: Text(m),
-                               selected: isSelected,
-                               onSelected: (val) {
-                                 setState(() {
-                                    if (val) selectedMethod = m;
-                                 });
-                               },
-                             ),
-                           );
-                         }).toList(),
-                       ),
-                     ),
-                     const SizedBox(height: 16),
-                     
-                     Row(
-                       children: [
-                         Expanded(
-                           child: TextField(
-                             controller: amountController,
-                             keyboardType: TextInputType.number,
-                             decoration: InputDecoration(
-                               labelText: "金額",
-                               border: const OutlineInputBorder(),
-                               prefixText: '\$',
-                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                             ),
-                           ),
-                         ),
-                         if (showCreditCardInput) ...[
-                           const SizedBox(width: 8),
-                           Expanded(
-                             child: TextField(
-                               controller: refController,
-                               keyboardType: TextInputType.number,
-                               maxLength: 4,
-                               decoration: const InputDecoration(
-                                 labelText: "末四碼",
-                                 border: OutlineInputBorder(),
-                                 counterText: "",
-                                 contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                               ),
-                             ),
-                           ),
-                         ],
-                         const SizedBox(width: 8),
-                         ElevatedButton(
-                           onPressed: _addPayment,
-                           style: ElevatedButton.styleFrom(
-                             shape: const CircleBorder(), 
-                             padding: const EdgeInsets.all(16)
-                           ),
-                           child: const Icon(CupertinoIcons.add),
-                         )
-                       ],
-                     ),
-                   ],
-                 ),
-              ),
-            ),
-            
-            // 3.5. Invoice Section
-            Container(
-               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-               decoration: BoxDecoration(
-                 color: Theme.of(context).cardColor,
-                 border: Border(top: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5))),
-               ),
-               child: Column(
-                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                 children: [
-                   Row(
-                     children: [
-                       Text("統一編號 (選填)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold)),
-                       const SizedBox(width: 8),
-                       Expanded(
-                         child: TextField(
-                           controller: ubnController,
-                           keyboardType: TextInputType.number,
-                           maxLength: 8,
-                           decoration: const InputDecoration(
-                             counterText: "",
-                             isDense: true,
-                             border: OutlineInputBorder(),
-                             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                           ),
-                         ),
-                       ),
-                     ],
-                   ),
-                   const SizedBox(height: 12),
-                   Row(
-                     children: [
-                       Text("載具設定 ", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold)),
-                       const SizedBox(width: 8),
-                       DropdownButton<String>(
-                         value: selectedCarrierType,
-                         isDense: true,
-                         items: const [
-                           DropdownMenuItem(value: 'none', child: Text("無")),
-                           DropdownMenuItem(value: '0', child: Text("手機條碼")),
-                           DropdownMenuItem(value: '1', child: Text("自然人憑證")),
-                         ],
-                         onChanged: (val) {
-                           if (val != null) setState(() => selectedCarrierType = val);
-                         },
-                       ),
-                       const SizedBox(width: 8),
-                       if (selectedCarrierType != 'none')
-                         Expanded(
-                           child: TextField(
-                             controller: carrierNumController,
-                             decoration: const InputDecoration(
-                               hintText: "例: /ABC1234",
-                               isDense: true,
-                               border: OutlineInputBorder(),
-                               contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                             ),
-                           ),
-                         ),
-                     ],
-                   )
-                 ],
-               ),
-            ),
-            
-            // 4. Final Action Button (Always Visible or at least when complete)
-            Container(
-               padding: const EdgeInsets.all(16),
-               color: Theme.of(context).cardColor, // Ensure background matches
-               child: SafeArea(
-                 top: false,
-                 child: SizedBox(
-                   height: 50,
-                   width: double.infinity,
-                   child: ElevatedButton(
-                     onPressed: isComplete && !isLoading ? _processPayment : null,
-                     style: ElevatedButton.styleFrom(
-                       backgroundColor: Theme.of(context).colorScheme.primary, 
-                       foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                     ),
-                     child: const Text("完成結帳", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                   ),
-                 ),
-               ),
-            )
+            const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
-  
-  bool get activeInput => _remaining > 0;
 }

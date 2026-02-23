@@ -285,19 +285,16 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
           children: [
             Text('請輸入用餐人數', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 16),
-            Container(
+            CupertinoTextField(
+              controller: paxController,
+              keyboardType: TextInputType.number,
+              placeholder: '人數',
+              autofocus: true,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
               decoration: BoxDecoration(
-                color: CupertinoColors.systemFill.resolveFrom(context),
+                color: Theme.of(context).colorScheme.secondary,
                 borderRadius: BorderRadius.circular(8),
-              ),
-              child: CupertinoTextField(
-                controller: paxController,
-                keyboardType: TextInputType.number,
-                placeholder: '人數',
-                autofocus: true,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
-                decoration: null,
               ),
             ),
           ],
@@ -370,7 +367,6 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
         
         // Re-implement existing logic using direct Supabase for creation (unchanged for now)
         // OR add to logic.
-        
         String? currentOpenId;
         try {
           final res = await Supabase.instance.client.rpc(
@@ -384,6 +380,21 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
         } catch (e) {
           debugPrint("Error fetching open_id in TableSelection: $e");
         }
+        
+        // Capture Tax Snapshot
+        Map<String, dynamic>? taxSnapshot;
+        try {
+           if (_orderingRepo == null) await _ensureRepository();
+           final profile = await _orderingRepo!.getTaxProfile();
+           taxSnapshot = {
+             'rate': profile.rate,
+             'is_tax_included': profile.isTaxIncluded,
+             'shop_id': profile.shopId,
+             'captured_at': DateTime.now().toIso8601String(),
+           };
+        } catch (e) {
+           debugPrint("Warning: Failed to capture tax snapshot in TableSelection screen: $e");
+        }
 
         await Supabase.instance.client.from('order_groups').insert({
           'shop_id': shopId,
@@ -391,6 +402,7 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
           'pax': pax,
           'status': 'dining', // Use Constant later
           'open_id': currentOpenId,
+          'tax_snapshot': taxSnapshot,
         });
         
         _selectedEmptyTables.clear();
@@ -885,16 +897,14 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
       context: context,
       builder: (context) => _DarkStyleDialog(
         title: "調整人數",
-        contentWidget: Container(
-          decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(8)),
-          child: CupertinoTextField(
-            controller: paxController,
-            keyboardType: TextInputType.number,
-            placeholder: "輸入新的人數",
-            padding: const EdgeInsets.all(12),
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
-            autofocus: true,
-          ),
+        contentWidget: CupertinoTextField(
+          controller: paxController,
+          keyboardType: TextInputType.number,
+          placeholder: "輸入新的人數",
+          padding: const EdgeInsets.all(12),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
+          autofocus: true,
+          decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondary, borderRadius: BorderRadius.circular(8)),
         ),
         onCancel: () => Navigator.pop(context),
         onConfirm: () async {
@@ -948,16 +958,14 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
       context: context,
       builder: (context) => _DarkStyleDialog(
         title: "整單備註",
-        contentWidget: Container(
-          decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(8)),
-          child: CupertinoTextField(
-            controller: noteController,
-            placeholder: "例如：VIP、壽星、不吃牛...",
-            maxLines: 3,
-            padding: const EdgeInsets.all(12),
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
-            autofocus: true,
-          ),
+        contentWidget: CupertinoTextField(
+          controller: noteController,
+          placeholder: "例如：VIP、壽星、不吃牛...",
+          maxLines: 3,
+          padding: const EdgeInsets.all(12),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
+          autofocus: true,
+          decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondary, borderRadius: BorderRadius.circular(8)),
         ),
         onCancel: () => Navigator.pop(context),
         onConfirm: () async {

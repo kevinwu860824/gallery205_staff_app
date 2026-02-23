@@ -50,19 +50,7 @@ final kitchenTicketServiceProvider = Provider<KitchenTicketService>((ref) {
 
 // Invoice Service (Singleton, Lazy)
 final invoiceServiceProvider = Provider<InvoiceService>((ref) {
-  final service = InvoiceServiceImpl();
-  
-  // Subscribe to Bus
-  final bus = ref.watch(orderEventBusProvider);
-  final sub = bus.stream.listen((event) {
-     if (event is PaymentCompletedEvent) {
-         service.onPaymentCompleted(event);
-     }
-  });
-  
-  ref.onDispose(() => sub.cancel());
-  
-  return service;
+  return InvoiceServiceImpl();
 });
 
 
