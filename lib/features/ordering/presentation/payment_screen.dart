@@ -44,6 +44,11 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final TextEditingController amountController = TextEditingController();
   final TextEditingController refController = TextEditingController(); // For Last 4
   
+  // Invoice Information
+  String selectedCarrierType = 'none'; // 'none', '0' (Mobile), '1' (Citizen), '2' (ezPay)
+  final TextEditingController carrierNumController = TextEditingController();
+  final TextEditingController ubnController = TextEditingController();
+  
   // Printing Data
   List<Map<String, dynamic>> _itemDetails = [];
   List<String> _tableNames = [];
@@ -79,6 +84,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   void dispose() {
     amountController.dispose();
     refController.dispose();
+    carrierNumController.dispose();
+    ubnController.dispose();
     super.dispose();
   }
 
@@ -274,12 +281,18 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       
       // 2. Update Order Group Status
       try {
+        final ubn = ubnController.text.trim();
+        final carrierNum = carrierNumController.text.trim();
+        
         await supabase.from('order_groups').update({
           'status': 'completed',
           'checkout_time': DateTime.now().toUtc().toIso8601String(),
           'payment_method': payments.map((p) => p['method']).toSet().join(','), 
           'final_amount': _totalAmount,
           'open_id': openId, // Link to shift
+          'buyer_ubn': ubn.isNotEmpty ? ubn : null,
+          'carrier_type': selectedCarrierType != 'none' ? selectedCarrierType : null,
+          'carrier_num': carrierNum.isNotEmpty ? carrierNum : null,
         }).eq('id', widget.groupKey);
       } catch (e) {
         throw "更新訂單狀態失敗: $e";
@@ -501,6 +514,71 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                    ],
                  ),
               ),
+            ),
+            
+            // 3.5. Invoice Section
+            Container(
+               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+               decoration: BoxDecoration(
+                 color: Theme.of(context).cardColor,
+                 border: Border(top: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5))),
+               ),
+               child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.stretch,
+                 children: [
+                   Row(
+                     children: [
+                       Text("統一編號 (選填)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold)),
+                       const SizedBox(width: 8),
+                       Expanded(
+                         child: TextField(
+                           controller: ubnController,
+                           keyboardType: TextInputType.number,
+                           maxLength: 8,
+                           decoration: const InputDecoration(
+                             counterText: "",
+                             isDense: true,
+                             border: OutlineInputBorder(),
+                             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                           ),
+                         ),
+                       ),
+                     ],
+                   ),
+                   const SizedBox(height: 12),
+                   Row(
+                     children: [
+                       Text("載具設定 ", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold)),
+                       const SizedBox(width: 8),
+                       DropdownButton<String>(
+                         value: selectedCarrierType,
+                         isDense: true,
+                         items: const [
+                           DropdownMenuItem(value: 'none', child: Text("無")),
+                           DropdownMenuItem(value: '0', child: Text("手機條碼")),
+                           DropdownMenuItem(value: '1', child: Text("自然人憑證")),
+                         ],
+                         onChanged: (val) {
+                           if (val != null) setState(() => selectedCarrierType = val);
+                         },
+                       ),
+                       const SizedBox(width: 8),
+                       if (selectedCarrierType != 'none')
+                         Expanded(
+                           child: TextField(
+                             controller: carrierNumController,
+                             decoration: const InputDecoration(
+                               hintText: "例: /ABC1234",
+                               isDense: true,
+                               border: OutlineInputBorder(),
+                               contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                             ),
+                           ),
+                         ),
+                     ],
+                   )
+                 ],
+               ),
             ),
             
             // 4. Final Action Button (Always Visible or at least when complete)
