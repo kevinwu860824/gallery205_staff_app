@@ -5,9 +5,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:gallery205_staff_app/features/auth/presentation/providers/auth_providers.dart';
 import 'package:go_router/go_router.dart';
+import 'package:gallery205_staff_app/features/ordering/presentation/providers/ordering_providers.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_context.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_item.dart';
+import 'package:gallery205_staff_app/features/ordering/data/models/ordering_models.dart'; // Added for OrderContextMapper
+import 'package:gallery205_staff_app/core/services/invoice_service.dart'; // Added
 import 'package:gallery205_staff_app/core/services/printer_service.dart';
 import 'package:gallery205_staff_app/features/ordering/data/repositories/ordering_repository_impl.dart';
 import 'package:gallery205_staff_app/features/ordering/data/datasources/ordering_remote_data_source.dart';
@@ -70,6 +73,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       
       final shopId = groupRes['shop_id'];
       if (shopId != null) {
+        // Fetch Print Categories
         final catsRes = await supabase
             .from('print_categories')
             .select('id, name')
@@ -78,6 +82,21 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
         for (var row in catsRes) {
           printCategoryNames[row['id']] = row['name'];
         }
+
+        // Fetch Shop Metadata for Printing
+        final shopRes = await supabase
+            .from('shops')
+            .select('name')
+            .eq('id', shopId)
+            .maybeSingle();
+        shopName = shopRes?['name'] ?? 'The Gallery 205';
+
+        final ezpayRes = await supabase
+            .from('shop_ezpay_settings')
+            .select('seller_ubn')
+            .eq('shop_id', shopId)
+            .maybeSingle();
+        sellerUbn = ezpayRes?['seller_ubn'] ?? '';
       }
 
       // 3. Event Sourcing & Batching
@@ -219,6 +238,36 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
     await _ensureRepository();
     
     try {
+      // 1. Check if we need to invalidate an ezPay invoice
+      final String? invoiceNum = orderData?['ezpay_invoice_number'];
+      final String? invoiceStatus = orderData?['ezpay_invoice_status']?.toString();
+      
+      if (invoiceNum != null && invoiceStatus == '1') {
+         // Show a specific warning for invoice invalidation
+         final bool? invalidateConfirm = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text("作廢電子發票"),
+              content: Text("此訂單已開立發票 ($invoiceNum)，作廢訂單將同步作廢電子發票。是否繼續？"),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("點錯了")),
+                TextButton(onPressed: () => Navigator.pop(c, true), child: const Text("確認作廢")),
+              ],
+            ),
+         );
+         
+         if (invalidateConfirm != true) {
+            setState(() => isLoading = false);
+            return;
+         }
+
+         // Call Invalidation
+         final bool invalidResult = await ref.read(invoiceServiceProvider).invalidateInvoice(widget.orderGroupId);
+         if (!invalidResult) {
+            throw "電子發票作廢失敗，請檢查網路或手動至藍新後台處理。";
+         }
+      }
+
       await _repository!.voidOrderGroup(
         widget.orderGroupId,
         staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty) 
@@ -451,6 +500,121 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("複製失敗: $e")));
     } finally {
       if(mounted) setState(() => isLoading = false);
+    }
+  }
+
+  String shopName = '';
+  String sellerUbn = '';
+
+  Future<void> _printInvoiceProof({bool isReprint = false}) async {
+    if (orderData == null) return;
+    
+    setState(() => isLoading = true);
+    try {
+      final contextData = OrderContextMapper.fromJson(orderData!, items.map((e) => OrderItemMapper.fromJson(e)).toList());
+      
+      final String shopIdStr = orderData!['shop_id'];
+      final allSettings = await Supabase.instance.client.from('printer_settings').select().eq('shop_id', shopIdStr);
+      final printerSettings = List<Map<String, dynamic>>.from(allSettings);
+
+      final printerService = PrinterService();
+      final int success = await printerService.printInvoiceProof(
+        order: contextData.order,
+        printerSettings: printerSettings,
+        shopName: shopName,
+        sellerUbn: sellerUbn,
+        isReprint: isReprint,
+      );
+
+      if (success > 0) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("電子發票證明聯列印成功")));
+      } else {
+        throw "無可用印表機或列印失敗";
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("列印失敗: $e")));
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _processRetryInvoice() async {
+    if (orderData == null) return;
+
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    // Warn about cross-period issuance
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text("補開電子發票"),
+        content: const Text(
+            "確定要補開這筆訂單的電子發票嗎？\n\n"
+            "【注意】請確認目前日期與訂單營業日是否為同一個申報期（雙數月底）。若跨期補開可能會有稅務申報上的問題，建議先與會計確認。"
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("取消")),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: colorScheme.primary),
+            onPressed: () => Navigator.pop(c, true), 
+            child: const Text("確認補開")
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => isLoading = true);
+    
+    try {
+      final InvoiceService invoiceService = ref.read(invoiceServiceProvider);
+      final String? newInvoiceNum = await invoiceService.issueInvoice(widget.orderGroupId);
+      
+      if (newInvoiceNum != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("成功開立發票：$newInvoiceNum")));
+        
+        // Ask if they want to print it
+        final bool? printConfirm = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text("發票開立成功"),
+            content: Text("發票號碼 $newInvoiceNum 已開立，是否立即列印證明聯？"),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("不列印")),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: colorScheme.primary),
+                onPressed: () => Navigator.pop(c, true), 
+                child: const Text("列印證明聯")
+              ),
+            ],
+          ),
+        );
+
+        if (printConfirm == true) {
+           // Reload first to get the QR codes from DB
+           await _loadData(); 
+           await _printInvoiceProof();
+        } else {
+           await _loadData();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text("補開失敗"),
+            content: Text("藍新 API 回傳錯誤：\n$e\n\n請檢查字軌是否用罄、參數設定，或稍後再試。"),
+            actions: [
+               TextButton(onPressed: () => Navigator.pop(c), child: const Text("確定"))
+            ],
+          )
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -750,18 +914,91 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                ),
                                Padding(
                                  padding: const EdgeInsets.all(16.0),
-                                 child: SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: _processPrintReceipt,
-                                    icon: const Icon(CupertinoIcons.printer),
-                                    label: const Text("列印結帳單"),
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.all(16),
-                                      side: BorderSide(color: colorScheme.primary), 
-                                      foregroundColor: colorScheme.primary, // Make it distinct
-                                    ),
-                                  ),
+                                 child: Column(
+                                   children: [
+                                     SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _processPrintReceipt,
+                                        icon: const Icon(CupertinoIcons.printer),
+                                        label: const Text("列印結帳單"),
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.all(16),
+                                          side: BorderSide(color: colorScheme.primary), 
+                                          foregroundColor: colorScheme.primary, // Make it distinct
+                                        ),
+                                      ),
+                                     ),
+                                     if (orderData?['ezpay_invoice_number'] != null && orderData?['ezpay_invoice_status']?.toString() == '1') ...[
+                                       const SizedBox(height: 12),
+                                       SizedBox(
+                                         width: double.infinity,
+                                         child: FilledButton.icon(
+                                           onPressed: _printInvoiceProof,
+                                           icon: const Icon(CupertinoIcons.barcode_viewfinder),
+                                           label: const Text("印發票證明聯"),
+                                           style: FilledButton.styleFrom(
+                                             padding: const EdgeInsets.all(16),
+                                             backgroundColor: Colors.indigo,
+                                           ),
+                                         ),
+                                       ),
+                                       const SizedBox(height: 12),
+                                       SizedBox(
+                                         width: double.infinity,
+                                         child: OutlinedButton.icon(
+                                           onPressed: () async {
+                                              final bool? confirm = await showDialog<bool>(
+                                                context: context,
+                                                builder: (c) => AlertDialog(
+                                                  title: const Text("發票補印"),
+                                                  content: const Text("確定要進行發票補印嗎？補印之證明聯將標記『(補印)』字樣。（註：每張發票僅能擁有一份正本證明聯，補印件不可重複對獎）"),
+                                                  actions: [
+                                                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("取消")),
+                                                    FilledButton(
+                                                      onPressed: () => Navigator.pop(c, true), 
+                                                      child: const Text("確認補印")
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirm == true) {
+                                                _printInvoiceProof(isReprint: true);
+                                              }
+                                           },
+                                           icon: const Icon(CupertinoIcons.printer),
+                                           label: const Text("補印發票證明聯"),
+                                           style: OutlinedButton.styleFrom(
+                                              padding: const EdgeInsets.all(16),
+                                              side: const BorderSide(color: Colors.indigo),
+                                              foregroundColor: Colors.indigo,
+                                           ),
+                                         ),
+                                       ),
+                                     ],
+                                      // Retry invoice Logic (Only if tax rate is 5.0)
+                                      if (orderData?['status'] == 'completed' && orderData?['ezpay_invoice_number'] == null && (orderData?['tax_snapshot']?['rate'] as num?)?.toDouble() == 5.0) ...[
+                                        const SizedBox(height: 12),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: FilledButton.icon(
+                                            onPressed: _processRetryInvoice,
+                                            icon: const Icon(CupertinoIcons.cloud_upload),
+                                            label: const Text("補開電子發票"),
+                                            style: FilledButton.styleFrom(
+                                              padding: const EdgeInsets.all(16),
+                                              backgroundColor: Colors.orange.shade700,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          "此訂單尚未成功開立發票",
+                                          style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 12),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ],
+                                   ],
                                  ),
                                )
                             ],

@@ -115,7 +115,14 @@ class OrderContextMapper {
       updatedAt: groupRow['updated_at'] != null ? DateTime.parse(groupRow['updated_at']) : null,
       shopId: groupRow['shop_id'],
       taxSnapshot: groupRow['tax_snapshot'] != null ? Map<String, dynamic>.from(groupRow['tax_snapshot']) : null,
-      staffName: groupRow['staff_name'], // Map staff_name
+      staffName: groupRow['staff_name'],
+      checkoutTime: groupRow['checkout_time'] != null ? DateTime.parse(groupRow['checkout_time']) : null,
+      ezpayInvoiceNumber: groupRow['ezpay_invoice_number'],
+      ezpayRandomNum: groupRow['ezpay_random_num'],
+      ezpayQrLeft: groupRow['ezpay_qr_left'],
+      ezpayQrRight: groupRow['ezpay_qr_right'],
+      finalAmount: (groupRow['final_amount'] as num?)?.toDouble(),
+      buyerUbn: groupRow['buyer_ubn'],
     );
 
     // 2. Construct OrderContext (Operations)

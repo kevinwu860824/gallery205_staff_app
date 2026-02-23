@@ -8,6 +8,9 @@ import 'package:esc_pos_utils/esc_pos_utils.dart';
 import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:barcode/barcode.dart' as bc_pkg;
+import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
 
 
 import '../../features/ordering/domain/entities/order_context.dart';
@@ -1027,15 +1030,192 @@ class PrinterService {
   }
 
 
-  void _drawTextCenter(ui.Canvas canvas, String text, double width, double y, TextStyle style) {
-    final textSpan = TextSpan(text: text, style: style);
-    final textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr, textAlign: TextAlign.center);
-    textPainter.layout(minWidth: width, maxWidth: width);
-    textPainter.paint(canvas, Offset(0, y));
+  // ----------------------------------------------------------------
+  // E-Invoice Proof Printing (電子發票證明聯)
+  // ----------------------------------------------------------------
+  Future<int> printInvoiceProof({
+    required OrderGroup order,
+    required List<Map<String, dynamic>> printerSettings,
+    required String shopName,
+    required String sellerUbn,
+    bool isReprint = false,
+  }) async {
+    final targets = printerSettings.where((p) => p['is_receipt_printer'] == true).toList();
+    if (targets.isEmpty) return 0;
+
+    int successCount = 0;
+    for (var printerConfig in targets) {
+      final String ip = printerConfig['ip'] ?? '';
+      final int paperWidth = printerConfig['paper_width_mm'] ?? 80;
+      if (ip.isEmpty) continue;
+
+      try {
+        final profile = await CapabilityProfile.load();
+        final printer = NetworkPrinter(paperWidth == 58 ? PaperSize.mm58 : PaperSize.mm80, profile);
+
+        final result = await printer.connect(ip, port: 9100);
+        if (result != PosPrintResult.success) continue;
+
+        final Uint8List imageBytes = await _generateInvoiceProofImage(
+          order: order,
+          shopName: shopName,
+          sellerUbn: sellerUbn,
+          paperWidth: paperWidth,
+          isReprint: isReprint,
+        );
+        
+        final decodedImage = img.decodeImage(imageBytes);
+        if (decodedImage != null) {
+          _applyHighContrast(decodedImage);
+          printer.image(decodedImage);
+          printer.feed(2); 
+          printer.cut();
+          successCount++;
+        }
+        printer.disconnect();
+      } catch (e) {
+        debugPrint("Print Invoice Proof Error ($ip): $e");
+      }
+    }
+    return successCount;
   }
+
+  Future<Uint8List> _generateInvoiceProofImage({
+    required OrderGroup order,
+    required String shopName,
+    required String sellerUbn,
+    required int paperWidth,
+    bool isReprint = false,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    const double proofWidth = 410.0;
+    final double canvWidth = (paperWidth == 58) ? 384.0 : 576.0;
+    final double startX = (canvWidth - proofWidth) / 2;
+
+    const double height = 1200.0; 
+    final canvas = ui.Canvas(recorder, Rect.fromPoints(Offset.zero, Offset(canvWidth, height)));
+    
+    final bgPaint = Paint()..color = Colors.white;
+    canvas.drawRect(Rect.fromLTWH(0, 0, canvWidth, height), bgPaint);
+
+    const String fontFamily = 'NotoSansTC';
+    final styleShop = TextStyle(color: Colors.black, fontSize: 32, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleTitle = TextStyle(color: Colors.black, fontSize: 42, fontFamily: fontFamily, fontWeight: FontWeight.w900);
+    final stylePeriod = TextStyle(color: Colors.black, fontSize: 34, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleInvoiceNum = TextStyle(color: Colors.black, fontSize: 44, fontFamily: fontFamily, fontWeight: FontWeight.w900);
+    final styleNormal = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.w500);
+    final styleLabel = TextStyle(color: Colors.black, fontSize: 22, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+
+    double y = 40;
+
+    // 1. Header
+    _drawTextCenter(canvas, shopName, canvWidth, y, styleShop);
+    y += 45;
+    if (isReprint) {
+      _drawTextCenter(canvas, "電子發票證明聯 (補印)", canvWidth, y, styleTitle.copyWith(fontSize: 38));
+    } else {
+      _drawTextCenter(canvas, "電子發票證明聯", canvWidth, y, styleTitle);
+    }
+    y += 60;
+
+    final time = order.checkoutTime ?? DateTime.now();
+    final year = time.year - 1911;
+    final month = time.month;
+    final periodStart = (month % 2 == 0) ? month - 1 : month;
+    final periodEnd = periodStart + 1;
+    final periodStartStr = periodStart.toString().padLeft(2, '0');
+    final periodEndStr = periodEnd.toString().padLeft(2, '0');
+    final periodStr = "${year}年$periodStartStr-$periodEndStr月";
+
+    _drawTextCenter(canvas, periodStr, canvWidth, y, stylePeriod);
+    y += 50;
+    _drawTextCenter(canvas, order.ezpayInvoiceNumber ?? "XX-XXXXXXXX", canvWidth, y, styleInvoiceNum);
+    y += 60;
+
+    // 2. Barcode Code 39
+    final String barcodeData = "${year}$periodStartStr${order.ezpayInvoiceNumber}";
+    final bc = bc_pkg.Barcode.code39();
+    final bcPaint = Paint()..color = Colors.black;
+    final bcPoints = bc.make(barcodeData, width: proofWidth, height: 60);
+    for (var point in bcPoints) {
+       if (point is bc_pkg.BarcodeBar) {
+          canvas.drawRect(Rect.fromLTWH(startX + point.left, y, point.width, point.height), bcPaint);
+       }
+    }
+    y += 80;
+
+    // 3. Metadata
+    final randomNum = order.ezpayRandomNum ?? "0000";
+    final totalAmt = order.finalAmount?.toInt() ?? 0;
+    final buyerUbn = order.buyerUbn ?? "00000000";
+    
+    _drawText(canvas, "隨機碼 $randomNum", startX, y, proofWidth/2, styleNormal);
+    _drawTextRight(canvas, "總計 \$$totalAmt", startX + proofWidth, y, proofWidth/2, styleNormal.copyWith(fontSize: 30, fontWeight: FontWeight.bold));
+    y += 40;
+
+    _drawText(canvas, "賣方 $sellerUbn", startX, y, proofWidth/2, styleNormal);
+    _drawTextRight(canvas, "買方 $buyerUbn", startX + proofWidth, y, proofWidth/2, styleNormal);
+    y += 50;
+
+    // 4. QR Codes
+    final qrSize = 180.0;
+    final qrGap = (proofWidth - (qrSize * 2)) / 3;
+    final String qrLeftData = order.ezpayQrLeft ?? "";
+    final String qrRightData = order.ezpayQrRight ?? "";
+
+    if (qrLeftData.isNotEmpty) {
+      final qrPainterL = QrPainter(
+        data: qrLeftData,
+        version: QrVersions.auto,
+        gapless: false,
+        color: Colors.black,
+        emptyColor: Colors.white,
+      );
+      qrPainterL.paint(canvas, Size(qrSize, qrSize));
+      // Need to translate canvas to draw at specific offset since paint doesn't take offset
+      // Wait, QrPainter.paint only takes (Canvas, Size). We should translate canvas.
+      
+      canvas.save();
+      canvas.translate(startX + qrGap, y);
+      qrPainterL.paint(canvas, Size(qrSize, qrSize));
+      canvas.restore();
+    }
+
+    if (qrRightData.isNotEmpty) {
+      final qrPainterR = QrPainter(
+        data: qrRightData,
+        version: QrVersions.auto,
+        gapless: false,
+        color: Colors.black,
+        emptyColor: Colors.white,
+      );
+      
+      canvas.save();
+      canvas.translate(startX + qrSize + (qrGap * 2), y);
+      qrPainterR.paint(canvas, Size(qrSize, qrSize));
+      canvas.restore();
+    }
+    y += qrSize + 40;
+
+    _drawTextCenter(canvas, "退貨請持證明聯辦理", canvWidth, y, styleLabel.copyWith(fontSize: 16));
+    y += 30;
+
+    final picture = recorder.endRecording();
+    final imgObj = await picture.toImage(canvWidth.toInt(), y.toInt());
+    final byteData = await imgObj.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
 
   void _drawSummaryRow(ui.Canvas canvas, String label, String value, double x, double y, double width, double padding, TextStyle styleLabel, TextStyle styleValue) {
       _drawText(canvas, label, x, y, width/2, styleLabel);
       _drawTextRight(canvas, value, width-padding, y, width/2, styleValue);
+  }
+
+  void _drawTextCenter(ui.Canvas canvas, String text, double totalWidth, double y, TextStyle style) {
+    final textSpan = TextSpan(text: text, style: style);
+    final textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr, textAlign: TextAlign.center);
+    textPainter.layout(minWidth: totalWidth, maxWidth: totalWidth);
+    textPainter.paint(canvas, Offset(0, y));
   }
 }
