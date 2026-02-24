@@ -440,56 +440,59 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         }
       }
 
-      // 4. Print Receipt (Sync)
+      // 4. Print Receipt (Sync or Semi-sync)
       try {
-         final printerService = PrinterService();
-         // ... (existing printer logic)
-         final allSettings = await supabase.from('printer_settings').select().eq('shop_id', shopId!);
-         final printerSettings = List<Map<String, dynamic>>.from(allSettings);
+        final printerService = PrinterService();
+        final allSettings = await supabase.from('printer_settings').select().eq('shop_id', shopId!);
+        final printerSettings = List<Map<String, dynamic>>.from(allSettings);
 
-         final orderGroup = OrderGroup(
-           id: widget.groupKey,
-           status: OrderStatus.completed,
-           items: [],
-           shopId: shopId,
-           createdAt: _createdAt,
-         );
-         
-         final orderContext = OrderContext(
-            order: orderGroup,
-            tableNames: _tableNames,
-            peopleCount: _pax,
-            staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty) 
-                  ? ref.read(authStateProvider).value!.name 
-                  : (ref.read(authStateProvider).value?.email ?? ''),
-         );
-         
-         // Tax Logic
-         final bool isIncluded = _taxProfile?.isTaxIncluded ?? true;
-         final double taxToPrint = isIncluded ? 0 : calculatedTax.toDouble();
-         final String? taxLabel = isIncluded ? null : "稅額 (${(_taxProfile?.rate ?? 0).toStringAsFixed(0)}%)";
+        final orderGroup = OrderGroup(
+          id: widget.groupKey,
+          status: OrderStatus.completed,
+          items: [],
+          shopId: shopId,
+          createdAt: _createdAt,
+        );
+        
+        final orderContext = OrderContext(
+          order: orderGroup,
+          tableNames: _tableNames,
+          peopleCount: _pax,
+          staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty) 
+                ? ref.read(authStateProvider).value!.name 
+                : (ref.read(authStateProvider).value?.email ?? ''),
+        );
+        
+        // Tax Logic
+        final bool isIncluded = _taxProfile?.isTaxIncluded ?? true;
+        final double taxToPrint = isIncluded ? 0 : calculatedTax.toDouble();
+        final String? taxLabel = isIncluded ? null : "稅額 (${(_taxProfile?.rate ?? 0).toStringAsFixed(0)}%)";
 
-         await printerService.printBill(
-            context: orderContext,
-            items: _itemDetails,
-            printerSettings: printerSettings,
-            subtotal: _subtotal,
-            serviceFee: _serviceFeeAmount,
-            discount: _discountAmount,
-            finalTotal: _totalAmount,
-            taxAmount: taxToPrint,
-            taxLabel: taxLabel,
-            orderSequenceNumber: _orderRank,
-            payments: payments, // Pass the payments list!
-         );
+        // We add a timeout to prevent hanging if a printer is unreachable
+        await printerService.printBill(
+          context: orderContext,
+          items: _itemDetails,
+          printerSettings: printerSettings,
+          subtotal: _subtotal,
+          serviceFee: _serviceFeeAmount,
+          discount: _discountAmount,
+          finalTotal: _totalAmount,
+          taxAmount: taxToPrint,
+          taxLabel: taxLabel,
+          orderSequenceNumber: _orderRank,
+          payments: payments,
+        ).timeout(const Duration(seconds: 10), onTimeout: () => 0);
       } catch (e) {
-         debugPrint("Payment Print Error: $e");
-         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("列印失敗: $e")));
+        debugPrint("Payment Print Error (Safe caught): $e");
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("收據列印失敗 (可稍後補印): $e")));
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("結帳完成 🎉")));
-        context.pop(true); // Return true to signal refresh 
+        // Safety: ensure we pop even if snackbar is still showing
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) Navigator.of(context).pop(true);
+        });
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("結帳失敗: $e")));

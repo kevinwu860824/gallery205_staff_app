@@ -91,12 +91,17 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
             .maybeSingle();
         shopName = shopRes?['name'] ?? 'The Gallery 205';
 
-        final ezpayRes = await supabase
-            .from('shop_ezpay_settings')
-            .select('seller_ubn')
-            .eq('shop_id', shopId)
-            .maybeSingle();
-        sellerUbn = ezpayRes?['seller_ubn'] ?? '';
+        try {
+          final ezpayRes = await supabase
+              .from('shop_ezpay_settings')
+              .select('seller_ubn')
+              .eq('shop_id', shopId)
+              .maybeSingle();
+          sellerUbn = ezpayRes?['seller_ubn'] ?? '';
+        } catch (e) {
+          debugPrint("Note: seller_ubn column might be missing: $e");
+          sellerUbn = '';
+        }
       }
 
       // 3. Event Sourcing & Batching
