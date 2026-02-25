@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'dart:math'; 
 import '../../settings/presentation/payment_method_settings_screen.dart'; 
 import 'package:gallery205_staff_app/l10n/app_localizations.dart';
+import 'package:gallery205_staff_app/core/services/printer_service.dart';
 
 // 白色圓角輸入框樣式
 InputDecoration _buildInputDecoration(BuildContext context, {String hintText = ''}) {
@@ -620,6 +621,32 @@ class _CashSettlementScreenState extends State<CashSettlementScreen> {
                 'operator_name': _currentUserName, 
             });
         }
+
+        // --- 觸發列印關帳單與單日銷售紀錄 ---
+        try {
+           final rpcData = await Supabase.instance.client.rpc('rpc_get_shift_settlement_data', params: {
+             'p_shop_id': _shopId,
+             'p_open_id': _currentOpenId,
+           });
+
+           final uiData = {
+              'paidInCash': _paidInCash,
+              'cashDifference': _cashDifference,
+              'depositsRedeemed': _enableDeposit ? _redeemedDepositTotal : 0.0,
+           };
+
+           debugPrint("Triggering settlement printing via PrinterService...");
+           final printerService = PrinterService();
+           await printerService.printSettlementRecords(
+              shopId: _shopId!,
+              staffName: _currentUserName ?? 'Staff',
+              rpcData: rpcData as Map<String, dynamic>,
+              uiData: uiData,
+           );
+        } catch (printErr) {
+           debugPrint('Failed to print settlement: $printErr');
+        }
+        // ------------------------------------
 
         if (mounted) {
              _showNoticeDialog(l10n.cashSettlementCloseSuccessTitle, l10n.cashSettlementCloseSuccessMsg, popPage: true); 

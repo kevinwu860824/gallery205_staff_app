@@ -84,6 +84,7 @@ dependencies:
   #原本沒有 security_helper，bcrypt 是有的
   bcrypt: ^1.1.3
   flutter_svg: ^2.2.3
+  barcode_widget: ^2.0.4
     
 
 dev_dependencies:

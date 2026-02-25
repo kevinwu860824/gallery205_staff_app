@@ -86,22 +86,15 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
         // Fetch Shop Metadata for Printing
         final shopRes = await supabase
             .from('shops')
-            .select('name')
+            .select('name, address, phone, code, uniform_id')
             .eq('id', shopId)
             .maybeSingle();
         shopName = shopRes?['name'] ?? 'The Gallery 205';
+        _shopAddress = shopRes?['address'];
+        _shopPhone = shopRes?['phone'];
+        _shopCode = shopRes?['code'];
+        sellerUbn = shopRes?['uniform_id'] ?? '';
 
-        try {
-          final ezpayRes = await supabase
-              .from('shop_ezpay_settings')
-              .select('seller_ubn')
-              .eq('shop_id', shopId)
-              .maybeSingle();
-          sellerUbn = ezpayRes?['seller_ubn'] ?? '';
-        } catch (e) {
-          debugPrint("Note: seller_ubn column might be missing: $e");
-          sellerUbn = '';
-        }
       }
 
       // 3. Event Sourcing & Batching
@@ -509,6 +502,9 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
   }
 
   String shopName = '';
+  String? _shopAddress;
+  String? _shopPhone;
+  String? _shopCode;
   String sellerUbn = '';
 
   Future<void> _printInvoiceProof({bool isReprint = false}) async {
@@ -528,6 +524,10 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
         printerSettings: printerSettings,
         shopName: shopName,
         sellerUbn: sellerUbn,
+        shopCode: _shopCode,
+        address: _shopAddress,
+        phone: _shopPhone,
+        itemDetails: items,
         isReprint: isReprint,
       );
 
@@ -934,22 +934,14 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                         ),
                                       ),
                                      ),
-                                     if (orderData?['ezpay_invoice_number'] != null && orderData?['ezpay_invoice_status']?.toString() == '1') ...[
-                                       const SizedBox(height: 12),
-                                       SizedBox(
-                                         width: double.infinity,
-                                         child: FilledButton.icon(
-                                           onPressed: _printInvoiceProof,
-                                           icon: const Icon(CupertinoIcons.barcode_viewfinder),
-                                           label: const Text("印發票證明聯"),
-                                           style: FilledButton.styleFrom(
-                                             padding: const EdgeInsets.all(16),
-                                             backgroundColor: Colors.indigo,
-                                           ),
-                                         ),
-                                       ),
-                                       const SizedBox(height: 12),
-                                       SizedBox(
+                                     
+                                     Builder(builder: (context) {
+                                        final isB2B = orderData?['buyer_ubn']?.toString().isNotEmpty == true;
+                                        final hasCarrier = orderData?['carrier_num']?.toString().isNotEmpty == true;
+                                        final canPrintInvoice = isB2B || !hasCarrier;
+                                        
+                                        if (orderData?['ezpay_invoice_number'] != null && orderData?['ezpay_invoice_status']?.toString() == '1' && canPrintInvoice) {
+                                            return SizedBox(
                                          width: double.infinity,
                                          child: OutlinedButton.icon(
                                            onPressed: () async {
@@ -979,8 +971,10 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                               foregroundColor: Colors.indigo,
                                            ),
                                          ),
-                                       ),
-                                     ],
+                                       );
+                                        }
+                                        return const SizedBox.shrink();
+                                     }),
                                       // Retry invoice Logic (Only if tax rate is 5.0)
                                       if (orderData?['status'] == 'completed' && orderData?['ezpay_invoice_number'] == null && (orderData?['tax_snapshot']?['rate'] as num?)?.toDouble() == 5.0) ...[
                                         const SizedBox(height: 12),
@@ -1034,10 +1028,12 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                       _buildInfoRow(context, "應收金額：", "\$${orderData?['final_amount'] ?? 0}"),
                                       _buildInfoRow(context, "實收金額：", "\$${orderData?['received_amount'] ?? 0}"),
                                       _buildInfoRow(context, "找零金額：", "\$${orderData?['change_amount'] ?? 0}"),
-                                      if (orderData?['invoice_number'] != null)
-                                         _buildInfoRow(context, "發票號碼：", orderData!['invoice_number']),
-                                      if (orderData?['unified_tax_number'] != null)
-                                         _buildInfoRow(context, "統一編號：", orderData!['unified_tax_number']),
+                                      if (orderData?['ezpay_invoice_number'] != null)
+                                         _buildInfoRow(context, "發票號碼：", orderData!['ezpay_invoice_number']),
+                                      if (orderData?['buyer_ubn'] != null)
+                                         _buildInfoRow(context, "統一編號：", orderData!['buyer_ubn']),
+                                      if (orderData?['carrier_num'] != null)
+                                         _buildInfoRow(context, "載具號碼：", orderData!['carrier_num']),
                                    ],
                                  ),
                                ),

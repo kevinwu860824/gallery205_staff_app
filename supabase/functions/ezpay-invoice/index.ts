@@ -85,17 +85,51 @@ serve(async (req) => {
     const amt = Math.round(totalAmt / 1.05);
     const taxAmt = totalAmt - amt;
 
-    const itemNames = items.map(i => i.item_name.substring(0, 30).replace(/\|/g, '')).join('|');
-    const itemCount = items.map(i => i.quantity).join('|');
-    const itemUnit = items.map(_ => '份').join('|');
-    const itemPrice = items.map(i => Math.round(i.price)).join('|');
-    const itemAmt = items.map(i => Math.round(i.price * i.quantity)).join('|');
+    let itemsSum = 0;
+    const finalItems = items.map(i => {
+      const price = Math.round(i.price);
+      const qty = i.quantity;
+      const itemAmt = price * qty;
+      itemsSum += itemAmt;
+      return {
+        name: i.item_name.substring(0, 30).replace(/\|/g, ''),
+        count: qty,
+        unit: '份',
+        price: price,
+        amt: itemAmt
+      };
+    });
+
+    const diff = totalAmt - itemsSum;
+    if (diff > 0) {
+      finalItems.push({
+        name: '服務費',
+        count: 1,
+        unit: '式',
+        price: diff,
+        amt: diff
+      });
+    } else if (diff < 0) {
+      finalItems.push({
+        name: '折扣',
+        count: 1,
+        unit: '式',
+        price: diff,
+        amt: diff
+      });
+    }
+
+    const itemNames = finalItems.map(i => i.name).join('|');
+    const itemCount = finalItems.map(i => i.count).join('|');
+    const itemUnit = finalItems.map(i => i.unit).join('|');
+    const itemPrice = finalItems.map(i => i.price).join('|');
+    const itemAmt = finalItems.map(i => i.amt).join('|');
 
     const params: Record<string, string> = {
       RespondType: 'JSON',
       Version: '1.5',
       TimeStamp: Math.floor(Date.now() / 1000).toString(),
-      MerchantOrderNo: order.id.substring(0, 20), // ezPay Limit
+      MerchantOrderNo: order.id.replace(/-/g, '_').substring(0, 20), // Shortened to 20 for safety
       Status: '1', // 1: Issue directly
       Category: order.buyer_ubn ? 'B2B' : 'B2C',
       BuyerName: order.buyer_ubn ? (order.buyer_name || 'Customer') : 'Customer',
@@ -115,13 +149,16 @@ serve(async (req) => {
       ItemAmt: itemAmt,
     };
 
+    console.log('ezPay Prepared Params:', JSON.stringify(params));
+
     const queryString = Object.entries(params)
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join('&');
 
     // 4. Encrypt
     const aesEncrypted = await encrypt(queryString, ezpaySettings.hash_key, ezpaySettings.hash_iv);
-    const checkValue = await sha256(`HashKey=${ezpaySettings.hash_key}&${aesEncrypted}&HashIV=${ezpaySettings.hash_iv}`);
+    // ezPay E-Invoice CheckValue is HashKey + PostData + HashIV -> SHA256
+    const checkValue = await sha256(`${ezpaySettings.hash_key}${aesEncrypted}${ezpaySettings.hash_iv}`);
 
     // 5. Call ezPay API
     // IMPORTANT: In production, ensure EZPAY_URL is set to https://einvoice.ezpay.com.tw/Api/invoice_issue

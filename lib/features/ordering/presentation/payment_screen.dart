@@ -50,6 +50,12 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final TextEditingController carrierNumController = TextEditingController();
   final TextEditingController ubnController = TextEditingController();
 
+  String? _shopName;
+  String? _shopAddress;
+  String? _shopPhone;
+  String? _sellerUbn;
+  String? _shopCode;
+
   // Exclusivity Check
   void _onUbnChanged() {
     if (ubnController.text.length == 8 && carrierNumController.text.isNotEmpty) {
@@ -199,6 +205,23 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           }
         });
       }
+
+      // Fetch Shop Info
+      final shopRes = await Supabase.instance.client
+          .from('shops')
+          .select('name, address, phone, code, uniform_id')
+          .eq('id', shopId)
+          .maybeSingle();
+      if (shopRes != null) {
+        if (mounted) setState(() {
+          _shopName = shopRes['name'];
+          _shopAddress = shopRes['address'];
+          _shopPhone = shopRes['phone'];
+          _shopCode = shopRes['code'];
+          _sellerUbn = shopRes['uniform_id'];
+        });
+      }
+
     } catch (e) {
       debugPrint("Load settings error: $e");
     }
@@ -407,18 +430,40 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       bus.fire(event);
 
       // 3.5. Issue Invoice (Synchronous/Blocking) if Tax is 5%
-      bool invoiceSuccess = false;
+      String? invoiceError;
       if (_taxProfile != null && _taxProfile!.rate == 5.0) {
-        while (!invoiceSuccess) {
-          invoiceSuccess = await ref.read(invoiceServiceProvider).onPaymentCompleted(event);
+        bool isResolved = false;
+        while (!isResolved) {
+          invoiceError = await ref.read(invoiceServiceProvider).onPaymentCompleted(event);
           
-          if (!invoiceSuccess) {
+          if (invoiceError != null) {
              final bool? retry = await showDialog<bool>(
                context: context,
                barrierDismissible: false,
                builder: (ctx) => AlertDialog(
                  title: const Text("發票開立失敗"),
-                 content: const Text("電子發票開立發生錯誤（可能是字軌用完或網路問題）。是否要重試？"),
+                 content: Column(
+                   mainAxisSize: MainAxisSize.min,
+                   crossAxisAlignment: CrossAxisAlignment.start,
+                   children: [
+                     const Text("電子發票開立發生錯誤。"),
+                     const SizedBox(height: 12),
+                     Container(
+                       padding: const EdgeInsets.all(8),
+                       decoration: BoxDecoration(
+                         color: Colors.red.withValues(alpha: 0.1),
+                         borderRadius: BorderRadius.circular(4),
+                         border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                       ),
+                       child: Text(
+                         invoiceError!,
+                         style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontFamily: 'monospace'),
+                       ),
+                     ),
+                     const SizedBox(height: 12),
+                     const Text("是否要重試？"),
+                   ],
+                 ),
                  actions: [
                    TextButton(
                      onPressed: () => Navigator.pop(ctx, false), 
@@ -433,10 +478,81 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
              );
              
              if (retry != true) {
-               // User chose to skip
-               break;
+               isResolved = true; // User skip
              }
+          } else {
+            isResolved = true; // Success
           }
+        }
+      }
+
+      // 3.6. Print Invoice Proof (if issued)
+      if (_taxProfile != null && _taxProfile!.rate == 5.0 && invoiceError == null) {
+        try {
+          final updatedGroup = await supabase.from('order_groups').select().eq('id', widget.groupKey).single();
+          final printerService = PrinterService();
+          final allSettings = await supabase.from('printer_settings').select().eq('shop_id', shopId!);
+          final printerSettings = List<Map<String, dynamic>>.from(allSettings);
+
+          final orderForProof = OrderGroup(
+             id: updatedGroup['id'],
+             status: OrderStatus.completed,
+             items: [],
+             shopId: shopId,
+             createdAt: _createdAt,
+             checkoutTime: updatedGroup['checkout_time'] != null ? DateTime.parse(updatedGroup['checkout_time']) : null,
+             ezpayInvoiceNumber: updatedGroup['ezpay_invoice_number'],
+             ezpayRandomNum: updatedGroup['ezpay_random_num'],
+             ezpayQrLeft: updatedGroup['ezpay_qr_left'],
+             ezpayQrRight: updatedGroup['ezpay_qr_right'],
+             finalAmount: (updatedGroup['final_amount'] as num?)?.toDouble(),
+             buyerUbn: updatedGroup['buyer_ubn']?.toString(),
+          );
+
+          final isB2B = updatedGroup['buyer_ubn'] != null && updatedGroup['buyer_ubn'].toString().length == 8;
+          final hasCarrier = updatedGroup['carrier_num'] != null && updatedGroup['carrier_num'].toString().trim().isNotEmpty;
+          
+          // Taiwan E-Invoice Rule: If B2B -> ALWAYS Print. If Carrier present (and no UBN) -> DO NOT Print Proof.
+          final shouldPrintInvoiceProof = isB2B || !hasCarrier;
+
+          if (shouldPrintInvoiceProof) {
+            await printerService.printInvoiceProof(
+               order: orderForProof,
+               printerSettings: printerSettings,
+               shopName: _shopName ?? 'Store',
+               sellerUbn: _sellerUbn ?? '',
+               shopCode: _shopCode,
+               address: _shopAddress,
+               phone: _shopPhone,
+               itemDetails: _itemDetails,
+               shouldCut: true, 
+            ).timeout(const Duration(seconds: 30), onTimeout: () => 0);
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("電子發票已開立並印出 🎉")));
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("電子發票已開立，存入載具 🎉")));
+            }
+          }
+          
+          // REMOVED EARLY RETURN: 
+          // We must let the function continue to Section 4 (printBill) 
+          // so B2C and Carrier users still get their itemized transaction receipt!
+
+          // --- CRITICAL FIX: PRINTER BUFFER OVERLAP ---
+          // B2B invoices are long. If we immediately blast the printer with the receipt (printBill)
+          // while it's still physically printing the invoice, the thermal printer's image buffer 
+          // or TCP stack can get corrupted, causing severe printing misalignment (錯位).
+          // We MUST enforce a mandatory "cooling-off" period to let the printer finish the first job.
+          if (shouldPrintInvoiceProof) {
+             debugPrint("Cooling off for 3 seconds before printing receipt...");
+             await Future.delayed(const Duration(seconds: 3));
+          }
+
+        } catch (e) {
+          debugPrint("Invoice Proof Print Error: $e");
         }
       }
 
