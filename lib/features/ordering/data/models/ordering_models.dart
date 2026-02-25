@@ -122,7 +122,7 @@ class OrderContextMapper {
       ezpayQrLeft: groupRow['ezpay_qr_left'],
       ezpayQrRight: groupRow['ezpay_qr_right'],
       finalAmount: (groupRow['final_amount'] as num?)?.toDouble(),
-      buyerUbn: groupRow['buyer_ubn'],
+      buyerUbn: groupRow['buyer_ubn']?.toString(),
     );
 
     // 2. Construct OrderContext (Operations)

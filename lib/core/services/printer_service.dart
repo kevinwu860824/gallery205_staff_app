@@ -10,8 +10,9 @@ import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:barcode/barcode.dart' as bc_pkg;
+import 'package:barcode_widget/barcode_widget.dart' as bc_widget;
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
-
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../features/ordering/domain/entities/order_context.dart';
 import '../../features/ordering/domain/entities/order_item.dart';
@@ -220,7 +221,7 @@ class PrinterService {
   /// Manually apply a threshold to make the image pure Black/White.
   /// Increasing threshold makes text thicker (captures lighter grays as black).
   void _applyHighContrast(img.Image src) {
-    const int threshold = 200; // 0-255. High threshold = Darker output
+    const int threshold = 220; // 0-255. High threshold = Darker output (Thicker text)
     final int black = img.getColor(0, 0, 0);
     final int white = img.getColor(255, 255, 255);
 
@@ -1038,7 +1039,12 @@ class PrinterService {
     required List<Map<String, dynamic>> printerSettings,
     required String shopName,
     required String sellerUbn,
+    String? shopCode,
+    String? address,
+    String? phone,
+    required List<Map<String, dynamic>> itemDetails,
     bool isReprint = false,
+    bool shouldCut = true,
   }) async {
     final targets = printerSettings.where((p) => p['is_receipt_printer'] == true).toList();
     if (targets.isEmpty) return 0;
@@ -1060,6 +1066,10 @@ class PrinterService {
           order: order,
           shopName: shopName,
           sellerUbn: sellerUbn,
+          shopCode: shopCode,
+          address: address,
+          phone: phone,
+          itemDetails: itemDetails,
           paperWidth: paperWidth,
           isReprint: isReprint,
         );
@@ -1068,8 +1078,10 @@ class PrinterService {
         if (decodedImage != null) {
           _applyHighContrast(decodedImage);
           printer.image(decodedImage);
-          printer.feed(2); 
-          printer.cut();
+          if (shouldCut) {
+            printer.feed(2); 
+            printer.cut();
+          }
           successCount++;
         }
         printer.disconnect();
@@ -1084,85 +1096,167 @@ class PrinterService {
     required OrderGroup order,
     required String shopName,
     required String sellerUbn,
+    String? shopCode,
+    String? address,
+    String? phone,
+    required List<Map<String, dynamic>> itemDetails,
     required int paperWidth,
     bool isReprint = false,
   }) async {
-    final recorder = ui.PictureRecorder();
-    const double proofWidth = 410.0;
-    final double canvWidth = (paperWidth == 58) ? 384.0 : 576.0;
-    final double startX = (canvWidth - proofWidth) / 2;
+  final recorder = ui.PictureRecorder();
+  final double canvWidth = (paperWidth == 58) ? 384.0 : 576.0;
+  // Reduce proofWidth to ensure it fits with margins. 
+  // Standard 80mm is 576, 58mm is 384.
+  double proofWidth = 380.0;
+  if (proofWidth > canvWidth - 40) {
+    proofWidth = canvWidth - 40; // Maintain at least 20px margin on each side
+  }
+  final double startX = (canvWidth - proofWidth) / 2;
 
-    const double height = 1200.0; 
-    final canvas = ui.Canvas(recorder, Rect.fromPoints(Offset.zero, Offset(canvWidth, height)));
-    
-    final bgPaint = Paint()..color = Colors.white;
-    canvas.drawRect(Rect.fromLTWH(0, 0, canvWidth, height), bgPaint);
+  // Increased from 1500 to 2000 to prevent long B2B itemized lists from being digitally clipped
+  const double maxHeight = 2000.0; 
+  final canvas = ui.Canvas(recorder, Rect.fromPoints(Offset.zero, Offset(canvWidth, maxHeight)));
+  
+  final bgPaint = Paint()..color = Colors.white;
+  canvas.drawRect(Rect.fromLTWH(0, 0, canvWidth, maxHeight), bgPaint);
 
-    const String fontFamily = 'NotoSansTC';
-    final styleShop = TextStyle(color: Colors.black, fontSize: 32, fontFamily: fontFamily, fontWeight: FontWeight.bold);
-    final styleTitle = TextStyle(color: Colors.black, fontSize: 42, fontFamily: fontFamily, fontWeight: FontWeight.w900);
-    final stylePeriod = TextStyle(color: Colors.black, fontSize: 34, fontFamily: fontFamily, fontWeight: FontWeight.bold);
-    final styleInvoiceNum = TextStyle(color: Colors.black, fontSize: 44, fontFamily: fontFamily, fontWeight: FontWeight.w900);
-    final styleNormal = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.w500);
-    final styleLabel = TextStyle(color: Colors.black, fontSize: 22, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+  const String fontFamily = 'NotoSansTC';
+  final styleLogo = TextStyle(color: Colors.black, fontSize: 62, fontFamily: fontFamily, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic);
+  final styleTitle = TextStyle(color: Colors.black, fontSize: 44, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+  final stylePeriod = TextStyle(color: Colors.black, fontSize: 42, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+  final styleInvoiceNum = TextStyle(color: Colors.black, fontSize: 52, fontFamily: fontFamily, fontWeight: FontWeight.w900);
+  final styleNormal = TextStyle(color: Colors.black, fontSize: 26, fontFamily: fontFamily, fontWeight: FontWeight.w500);
+  final styleMeta = TextStyle(color: Colors.black, fontSize: 28, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+  final styleFooter = TextStyle(color: Colors.black, fontSize: 22, fontFamily: fontFamily, fontWeight: FontWeight.w500);
 
-    double y = 40;
+  double y = 40;
 
-    // 1. Header
-    _drawTextCenter(canvas, shopName, canvWidth, y, styleShop);
-    y += 45;
-    if (isReprint) {
-      _drawTextCenter(canvas, "電子發票證明聯 (補印)", canvWidth, y, styleTitle.copyWith(fontSize: 38));
-    } else {
-      _drawTextCenter(canvas, "電子發票證明聯", canvWidth, y, styleTitle);
-    }
-    y += 60;
+  // 1. Header: Shop Name (Logo)
+  _drawTextCenter(canvas, shopName, canvWidth, y, styleLogo);
+  y += 75;
 
-    final time = order.checkoutTime ?? DateTime.now();
-    final year = time.year - 1911;
-    final month = time.month;
-    final periodStart = (month % 2 == 0) ? month - 1 : month;
-    final periodEnd = periodStart + 1;
-    final periodStartStr = periodStart.toString().padLeft(2, '0');
-    final periodEndStr = periodEnd.toString().padLeft(2, '0');
-    final periodStr = "${year}年$periodStartStr-$periodEndStr月";
+  // 2. Title
+  if (isReprint) {
+    _drawTextCenter(canvas, "電子發票證明聯 (補印)", canvWidth, y, styleTitle.copyWith(fontSize: 38));
+  } else {
+    _drawTextCenter(canvas, "電子發票證明聯", canvWidth, y, styleTitle);
+  }
+  y += 65;
 
-    _drawTextCenter(canvas, periodStr, canvWidth, y, stylePeriod);
-    y += 50;
-    _drawTextCenter(canvas, order.ezpayInvoiceNumber ?? "XX-XXXXXXXX", canvWidth, y, styleInvoiceNum);
-    y += 60;
+  // 3. Period
+  final time = (order.checkoutTime ?? DateTime.now()).toLocal();
+  final year = time.year - 1911;
+  final month = time.month;
+  final periodStart = (month % 2 == 0) ? month - 1 : month;
+  final periodEnd = periodStart + 1;
+  final periodStartStr = periodStart.toString().padLeft(2, '0');
+  final periodEndStr = periodEnd.toString().padLeft(2, '0');
+  final periodStr = "${year}年$periodStartStr-$periodEndStr月";
 
-    // 2. Barcode Code 39
-    final String barcodeData = "${year}$periodStartStr${order.ezpayInvoiceNumber}";
-    final bc = bc_pkg.Barcode.code39();
-    final bcPaint = Paint()..color = Colors.black;
-    final bcPoints = bc.make(barcodeData, width: proofWidth, height: 60);
-    for (var point in bcPoints) {
-       if (point is bc_pkg.BarcodeBar) {
-          canvas.drawRect(Rect.fromLTWH(startX + point.left, y, point.width, point.height), bcPaint);
-       }
-    }
-    y += 80;
+  _drawTextCenter(canvas, periodStr, canvWidth, y, stylePeriod);
+  y += 60;
 
-    // 3. Metadata
-    final randomNum = order.ezpayRandomNum ?? "0000";
-    final totalAmt = order.finalAmount?.toInt() ?? 0;
-    final buyerUbn = order.buyerUbn ?? "00000000";
-    
-    _drawText(canvas, "隨機碼 $randomNum", startX, y, proofWidth/2, styleNormal);
-    _drawTextRight(canvas, "總計 \$$totalAmt", startX + proofWidth, y, proofWidth/2, styleNormal.copyWith(fontSize: 30, fontWeight: FontWeight.bold));
+  // 4. Invoice Number (Boldly formatted with hyphen)
+  String rawNum = order.ezpayInvoiceNumber ?? "XX-XXXXXXXX";
+  String formattedNum = rawNum;
+  if (rawNum.length == 10 && !rawNum.contains('-')) {
+    formattedNum = "${rawNum.substring(0, 2)}-${rawNum.substring(2)}";
+  }
+  _drawTextCenter(canvas, formattedNum, canvWidth, y, styleInvoiceNum);
+  y += 70;
+
+  // 5. Timestamp (YYYY-MM-DD HH:mm:ss)
+  final String timestamp = "${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}";
+  _drawText(canvas, timestamp, startX, y, proofWidth, styleNormal);
+  y += 40;
+
+  // 6. Metadata Layout
+  final randomNum = order.ezpayRandomNum ?? "0000";
+  final totalAmt = order.finalAmount?.toInt() ?? 0;
+  final buyerUbn = order.buyerUbn ?? "";
+  
+  // Row 1: Random Code and Total
+  _drawText(canvas, "隨機碼 : $randomNum", startX, y, proofWidth/2, styleMeta);
+  _drawTextRight(canvas, "總計 : $totalAmt", startX + proofWidth, y, proofWidth/2, styleMeta);
+  y += 40;
+
+  // Row 2: Seller UBN
+  _drawText(canvas, "賣方 : $sellerUbn", startX, y, proofWidth, styleMeta);
+
+  if (buyerUbn.isNotEmpty && buyerUbn != "00000000") {
     y += 40;
+    _drawText(canvas, "買方 : $buyerUbn", startX, y, proofWidth, styleMeta);
+  }
 
-    _drawText(canvas, "賣方 $sellerUbn", startX, y, proofWidth/2, styleNormal);
-    _drawTextRight(canvas, "買方 $buyerUbn", startX + proofWidth, y, proofWidth/2, styleNormal);
+  // 7. Barcode Code 128 (Standard for E-Invoice)
+  if (order.ezpayInvoiceNumber != null && order.ezpayInvoiceNumber!.isNotEmpty) {
     y += 50;
+    // --- PIXEL PERFECT MANUAL PAINTER ---
+    // The `barcode_widget` package relies on Flutter UI nodes. Instead, we use the core 
+    // `barcode` package to get the exact boolean map of the Code128 pattern, and paint
+    // it manually onto the Canvas.
+    final String barcodeData = "${year}$periodEndStr${order.ezpayInvoiceNumber}$randomNum";
+    final bc = bc_pkg.Barcode.code128();
+    final bcPaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.fill;
+    
+    // 1. Get the logical structure of the barcode. 
+    // We pass a dummy width (e.g., 200) just to satisfy the API. 
+    // The barcode package will return logical units that we will rescale perfectly anyway.
+    final bcPoints = bc.make(barcodeData, width: 200.0, height: 80);
+    
+    // 2. Find total logical width
+    double totalLogicalWidth = 0;
+    for (var p in bcPoints) {
+      if (p.left + p.width > totalLogicalWidth) {
+        totalLogicalWidth = p.left + p.width;
+      }
+    }
+    
+    // 3. FORCE multiplier to prevent thermal bleed. 
+    // Usually Code128 is ~150-180 units wide. * 2.0 = ~300-360px (fits easily in 380px proofWidth)
+    final double moduleMultiplier = 2.0;
+    final double finalPixelWidth = totalLogicalWidth * moduleMultiplier;
+    
+    // 4. Center it on the paper
+    final double bcStartX = startX + (proofWidth - finalPixelWidth) / 2;
+    
+    // 5. Paint it to canvas with absolute, rounded integer constraints
+    for (var p in bcPoints) {
+      if (p is bc_pkg.BarcodeBar) {
+         // Round to the nearest physical pixel
+         final double left = (bcStartX + (p.left * moduleMultiplier)).roundToDouble();
+         final double logicalWidth = (p.width * moduleMultiplier).roundToDouble();
+         
+         // --- THERMAL BLEED COMPENSATION ---
+         // The printer head bleeds heat, causing black lines to expand by ~1 dot on each side,
+         // squeezing the white gaps shut (as seen in user photos).
+         // We counteract this by intentionally drawing each black bar narrower.
+         // We shave off 1.0 pixel of width to leave extra room for the physical ink to spread.
+         final double bleedCompensation = 1.0; 
+         double finalWidth = logicalWidth - bleedCompensation;
+         
+         // Safety check: ensure we don't accidentally make a bar disappear entirely
+         if (finalWidth < 0.5) finalWidth = 0.5;
 
-    // 4. QR Codes
-    final qrSize = 180.0;
-    final qrGap = (proofWidth - (qrSize * 2)) / 3;
-    final String qrLeftData = order.ezpayQrLeft ?? "";
-    final String qrRightData = order.ezpayQrRight ?? "";
+         canvas.drawRect(
+           Rect.fromLTWH(left, y, finalWidth, 80),
+           bcPaint
+         );
+      }
+    }
+    y += 110;
+  }
 
+  // 8. QR Codes
+  final qrSize = 150.0; // Shrunk from 175
+  final qrGap = (proofWidth - (qrSize * 2)) / 3;
+  final String qrLeftData = order.ezpayQrLeft ?? "";
+  final String qrRightData = order.ezpayQrRight ?? "";
+
+  if (qrLeftData.isNotEmpty || qrRightData.isNotEmpty) {
+    y += 20; // Small space before QRs
     if (qrLeftData.isNotEmpty) {
       final qrPainterL = QrPainter(
         data: qrLeftData,
@@ -1171,12 +1265,8 @@ class PrinterService {
         color: Colors.black,
         emptyColor: Colors.white,
       );
-      qrPainterL.paint(canvas, Size(qrSize, qrSize));
-      // Need to translate canvas to draw at specific offset since paint doesn't take offset
-      // Wait, QrPainter.paint only takes (Canvas, Size). We should translate canvas.
-      
       canvas.save();
-      canvas.translate(startX + qrGap, y);
+      canvas.translate(startX + qrGap/2, y);
       qrPainterL.paint(canvas, Size(qrSize, qrSize));
       canvas.restore();
     }
@@ -1189,27 +1279,89 @@ class PrinterService {
         color: Colors.black,
         emptyColor: Colors.white,
       );
-      
       canvas.save();
-      canvas.translate(startX + qrSize + (qrGap * 2), y);
+      canvas.translate(startX + qrSize + qrGap*2, y); // Adjust positioning for side-by-side
       qrPainterR.paint(canvas, Size(qrSize, qrSize));
       canvas.restore();
     }
     y += qrSize + 40;
-
-    _drawTextCenter(canvas, "退貨請持證明聯辦理", canvWidth, y, styleLabel.copyWith(fontSize: 16));
-    y += 30;
-
-    final picture = recorder.endRecording();
-    final imgObj = await picture.toImage(canvWidth.toInt(), y.toInt());
-    final byteData = await imgObj.toByteData(format: ui.ImageByteFormat.png);
-    return byteData!.buffer.asUint8List();
   }
 
+  // 9. Footer Note
+  _drawTextCenter(canvas, "備  註：此為電子發票開立測試樣張", canvWidth, y, styleFooter);
+  y += 40;
 
-  void _drawSummaryRow(ui.Canvas canvas, String label, String value, double x, double y, double width, double padding, TextStyle styleLabel, TextStyle styleValue) {
+  // 10. Store Info Footer
+  if (address != null && address.isNotEmpty) {
+    _drawText(canvas, "地址：$address", startX, y, proofWidth, styleFooter);
+    y += 30;
+  }
+  if (phone != null && phone.isNotEmpty) {
+    _drawText(canvas, "ＴＥＬ：$phone", startX, y, proofWidth, styleFooter);
+    y += 35;
+  }
+
+  // 11. B2B Transaction Details & Tax Breakdown
+  if (buyerUbn.isNotEmpty && buyerUbn != "00000000" && itemDetails.isNotEmpty) {
+    y += 20;
+    _drawText(canvas, "＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝", startX, y, proofWidth, styleFooter);
+    y += 30;
+
+    int itemsSum = 0;
+    for (var item in itemDetails) {
+      String name = item['item_name'] ?? 'Item';
+      int qty = item['quantity'] ?? 1;
+      int price = (item['price'] as num?)?.toInt() ?? 0;
+      int amt = qty * price;
+      itemsSum += amt;
+      _drawText(canvas, name, startX, y, proofWidth, styleFooter);
+      y += 30;
+      _drawText(canvas, "$qty x \$$price", startX, y, proofWidth/2, styleFooter);
+      _drawTextRight(canvas, "\$$amt", startX + proofWidth/2, y, proofWidth/2, styleFooter);
+      y += 30;
+    }
+
+    int finalTotalAmt = order.finalAmount?.toInt() ?? 0;
+    int diff = finalTotalAmt - itemsSum;
+    
+    if (diff > 0) {
+      _drawText(canvas, "服務費", startX, y, proofWidth, styleFooter);
+      y += 30;
+      _drawText(canvas, "1 x \$$diff", startX, y, proofWidth/2, styleFooter);
+      _drawTextRight(canvas, "\$$diff", startX + proofWidth/2, y, proofWidth/2, styleFooter);
+      y += 30;
+    } else if (diff < 0) {
+      _drawText(canvas, "折扣", startX, y, proofWidth, styleFooter);
+      y += 30;
+      _drawText(canvas, "1 x \$$diff", startX, y, proofWidth/2, styleFooter);
+      _drawTextRight(canvas, "\$$diff", startX + proofWidth/2, y, proofWidth/2, styleFooter);
+      y += 30;
+    }
+
+    _drawText(canvas, "＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝", startX, y, proofWidth, styleFooter);
+    y += 30;
+
+    // Tax Breakdown for B2B (Assumes 5% tax included in price)
+    int salesAmount = (finalTotalAmt / 1.05).round();
+    int taxAmount = finalTotalAmt - salesAmount;
+
+    _drawSummaryRow(canvas, "銷售額", "\$$salesAmount", startX, y, proofWidth, 0, styleFooter, styleFooter);
+    y += 30;
+    _drawSummaryRow(canvas, "營業稅", "\$$taxAmount", startX, y, proofWidth, 0, styleFooter, styleFooter);
+    y += 30;
+    _drawSummaryRow(canvas, "總　計", "\$$finalTotalAmt", startX, y, proofWidth, 0, styleFooter, styleFooter);
+    y += 40;
+  }
+
+  final picture = recorder.endRecording();
+  final imgObj = await picture.toImage(canvWidth.toInt(), y.toInt());
+  final byteData = await imgObj.toByteData(format: ui.ImageByteFormat.png);
+  return byteData!.buffer.asUint8List();
+}
+
+void _drawSummaryRow(ui.Canvas canvas, String label, String value, double x, double y, double width, double padding, TextStyle styleLabel, TextStyle styleValue) {
       _drawText(canvas, label, x, y, width/2, styleLabel);
-      _drawTextRight(canvas, value, width-padding, y, width/2, styleValue);
+      _drawTextRight(canvas, value, x + width - padding, y, width/2, styleValue);
   }
 
   void _drawTextCenter(ui.Canvas canvas, String text, double totalWidth, double y, TextStyle style) {
@@ -1217,5 +1369,342 @@ class PrinterService {
     final textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr, textAlign: TextAlign.center);
     textPainter.layout(minWidth: totalWidth, maxWidth: totalWidth);
     textPainter.paint(canvas, Offset(0, y));
+  }
+
+  // ----------------------------------------------------------------
+  // Settlement Printing (關帳單 & 單日銷售紀錄)
+  // ----------------------------------------------------------------
+  Future<void> printSettlementRecords({
+    required String shopId,
+    required String staffName,
+    required Map<String, dynamic> rpcData,
+    required Map<String, dynamic> uiData,
+  }) async {
+    try {
+      final res = await Supabase.instance.client
+          .from('printer_settings')
+          .select('*')
+          .eq('shop_id', shopId)
+          .eq('is_receipt_printer', true);
+      
+      final receiptPrinters = List<Map<String, dynamic>>.from(res);
+
+      if (receiptPrinters.isEmpty) {
+        debugPrint("No receipt printers configured for settlement printing.");
+        return;
+      }
+
+      final profile = await CapabilityProfile.load();
+      
+      for (var p in receiptPrinters) {
+        final ip = p['ip'];
+        final widthMm = p['paper_width_mm'] ?? 80;
+        final paperSize = (widthMm == 58) ? PaperSize.mm58 : PaperSize.mm80;
+
+        try {
+          final printer = NetworkPrinter(paperSize, profile);
+          final res = await printer.connect(ip, port: 9100, timeout: const Duration(seconds: 5));
+          if (res != PosPrintResult.success) {
+            debugPrint("Failed to connect to printer $ip for settlement");
+            continue;
+          }
+
+          // 1. 單日銷售紀錄 (Daily Sales)
+          final salesBytes = await _generateDailySalesImage(staffName, rpcData, widthMm);
+          final img.Image? decodedSales = img.decodeImage(salesBytes);
+          if (decodedSales != null) {
+            _applyHighContrast(decodedSales);
+            printer.image(decodedSales);
+            printer.feed(1);
+            printer.cut();
+          }
+
+          // Buffer between cuts (thermal printers can jam on successive cuts)
+          await Future.delayed(const Duration(milliseconds: 1000));
+
+          // 2. 關帳紀錄 (Settlement Record)
+          final settlementBytes = await _generateSettlementRecordImage(staffName, rpcData, uiData, widthMm);
+          final img.Image? decodedSettlement = img.decodeImage(settlementBytes);
+          if (decodedSettlement != null) {
+            _applyHighContrast(decodedSettlement);
+            printer.image(decodedSettlement);
+            printer.feed(2);
+            printer.cut();
+          }
+
+          printer.disconnect();
+        } catch (e) {
+          debugPrint("Error printing settlement to $ip: $e");
+        }
+      }
+    } catch (e) {
+      debugPrint("printSettlementRecords exception: $e");
+    }
+  }
+
+  Future<Uint8List> _generateDailySalesImage(String staffName, Map<String, dynamic> rpcData, int paperWidthMm) async {
+    final double width = (paperWidthMm == 58) ? 384.0 : 576.0;
+    final double startX = (paperWidthMm == 58) ? 0.0 : 10.0;
+    final double contentWidth = width - (startX * 2);
+    
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder, ui.Rect.fromLTWH(0, 0, width, 5000));
+    final bgPaint = Paint()..color = Colors.white;
+    canvas.drawRect(Rect.fromLTWH(0, 0, width, 5000), bgPaint);
+
+    const String fontFamily = 'NotoSansTC'; 
+    final styleTitle = TextStyle(color: Colors.black, fontSize: 32, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleHeader = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.bold); // Increased weight
+    final styleCategory = TextStyle(color: Colors.black, fontSize: 28, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleItem = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.bold); // Increased weight
+
+    double y = 40.0;
+    
+    _drawTextCenter(canvas, "GALLERY 205", width, y, styleTitle.copyWith(fontSize: 40));
+    y += 50;
+    _drawTextCenter(canvas, "Gallery 205", width, y, styleHeader);
+    y += 40;
+
+    // Title Block
+    final paintObj = Paint()..color = Colors.black..style = PaintingStyle.fill;
+    canvas.drawRect(Rect.fromLTWH(startX, y, contentWidth, 40), paintObj);
+    _drawTextCenter(canvas, "單日銷售紀錄", width, y + 4, styleTitle.copyWith(color: Colors.white));
+    y += 50;
+
+    // Date & Staff
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy/MM/dd EEEE', 'zh_TW').format(now);
+    final timeStr = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+    
+    _drawText(canvas, todayStr, startX, y, contentWidth, styleHeader);
+    y += 35;
+    _drawText(canvas, "列印時間:$timeStr", startX, y, contentWidth, styleHeader.copyWith(fontSize: 20));
+    y += 30;
+    _drawText(canvas, "人員:$staffName", startX, y, contentWidth, styleHeader);
+    y += 40;
+
+    _drawDivider(canvas, width, y);
+    y += 20;
+
+    // Items by Category
+    final List<dynamic> itemizedSales = rpcData['itemized_sales'] ?? [];
+    int totalItems = 0;
+    double totalSales = 0.0;
+
+    for (var cat in itemizedSales) {
+      String catName = cat['category'] ?? '未分類';
+      List<dynamic> items = cat['items'] ?? [];
+      if (items.isEmpty) continue;
+
+      _drawText(canvas, catName, startX, y, contentWidth, styleCategory);
+      y += 40;
+
+      for (var item in items) {
+        String name = item['name'] ?? 'Item';
+        int qty = item['qty'] ?? 0;
+        double subtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
+        totalItems += qty;
+        totalSales += subtotal;
+
+        double nameHeight = _drawText(canvas, name, startX, y, contentWidth * 0.5, styleItem);
+        _drawText(canvas, "x$qty", startX + contentWidth * 0.6, y, contentWidth * 0.15, styleItem);
+        _drawTextRight(canvas, "${subtotal.toStringAsFixed(0)}", startX + contentWidth, y, contentWidth * 0.25, styleItem);
+        
+        y += (nameHeight > 35 ? nameHeight : 35) + 5;
+      }
+      
+      y += 10;
+      _drawDivider(canvas, width, y);
+      y += 20;
+    }
+
+    // Footer summary
+    _drawSummaryRow(canvas, "合計項目數", "$totalItems", startX, y, contentWidth, 0, styleHeader, styleHeader);
+    y += 40;
+    _drawSummaryRow(canvas, "總銷售額(不含折扣及服務費)", "${totalSales.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleHeader, styleHeader);
+    y += 50;
+    _drawDivider(canvas, width, y);
+    y += 40;
+
+    final picture = recorder.endRecording();
+    final imgObj = await picture.toImage(width.toInt(), y.toInt());
+    final byteData = await imgObj.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  Future<Uint8List> _generateSettlementRecordImage(String staffName, Map<String, dynamic> rpcData, Map<String, dynamic> uiData, int paperWidthMm) async {
+    final double width = (paperWidthMm == 58) ? 384.0 : 576.0;
+    final double startX = (paperWidthMm == 58) ? 0.0 : 10.0;
+    final double contentWidth = width - (startX * 2);
+    
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder, ui.Rect.fromLTWH(0, 0, width, 5000));
+    final bgPaint = Paint()..color = Colors.white;
+    canvas.drawRect(Rect.fromLTWH(0, 0, width, 5000), bgPaint);
+
+    const String fontFamily = 'NotoSansTC'; 
+    final styleTitle = TextStyle(color: Colors.black, fontSize: 32, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleHeader = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.bold); // Increased weight
+    final styleCategory = TextStyle(color: Colors.black, fontSize: 26, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+    final styleLabel = TextStyle(color: Colors.black, fontSize: 24, fontFamily: fontFamily, fontWeight: FontWeight.bold); // Increased weight
+    final styleValueBig = TextStyle(color: Colors.black, fontSize: 28, fontFamily: fontFamily, fontWeight: FontWeight.bold);
+
+    double y = 40.0;
+    
+    _drawTextCenter(canvas, "GALLERY 205", width, y, styleTitle.copyWith(fontSize: 40));
+    y += 50;
+    _drawTextCenter(canvas, "Gallery 205", width, y, styleHeader);
+    y += 40;
+
+    // Title Block
+    final paintObj = Paint()..color = Colors.black..style = PaintingStyle.fill;
+    canvas.drawRect(Rect.fromLTWH(startX, y, contentWidth, 40), paintObj);
+    _drawTextCenter(canvas, "關帳紀錄", width, y + 4, styleTitle.copyWith(color: Colors.white));
+    y += 50;
+
+    final now = DateTime.now();
+    final timeStr = DateFormat('yyyy/MM/dd HH:mm:ss').format(now);
+    
+    _drawText(canvas, "本次關帳: $timeStr", startX, y, contentWidth, styleHeader.copyWith(fontSize: 20));
+    y += 30;
+    _drawText(canvas, "人員: $staffName", startX, y, contentWidth, styleHeader.copyWith(fontSize: 20));
+    y += 40;
+
+    // --- Data Extraction ---
+    final metrics = rpcData['metrics'] ?? {};
+    final payments = rpcData['payments'] ?? {};
+    
+    double totalRevenue = (metrics['total_revenue'] as num?)?.toDouble() ?? 0.0;
+    double totalDiscount = (metrics['total_discount'] as num?)?.toDouble() ?? 0.0;
+    double totalVoidAmount = (metrics['total_void_amount'] as num?)?.toDouble() ?? 0.0;
+    
+    int totalTransactions = metrics['total_transactions'] ?? 0;
+    int voidTransactions = metrics['void_transactions'] ?? 0;
+    int totalGuests = metrics['total_guests'] ?? 0;
+    
+    // UI Data
+    double paidInCash = (uiData['paidInCash'] as num?)?.toDouble() ?? 0.0;
+    double cashDifference = (uiData['cashDifference'] as num?)?.toDouble() ?? 0.0;
+    double depositsRedeemed = (uiData['depositsRedeemed'] as num?)?.toDouble() ?? 0.0;
+
+    // 1. 營業額 Block
+    _drawSummaryRow(canvas, "營業額", "${totalRevenue.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    
+    _drawSummaryRow(canvas, "現金總收入", "${paidInCash.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    
+    payments.forEach((method, amount) {
+       double amt = (amount as num?)?.toDouble() ?? 0.0;
+       if (amt > 0) {
+         _drawSummaryRow(canvas, "+ $method", "${amt.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+         y += 35;
+       }
+    });
+
+    if (cashDifference > 0) { // Overage
+      _drawSummaryRow(canvas, "+ 溢收找零", "${cashDifference.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+      y += 35;
+    }
+
+    y += 10;
+    // 溢收金額
+    _drawSummaryRow(canvas, "溢收金額", "${(cashDifference > 0 ? cashDifference : 0).toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+
+    // 作廢總額
+    _drawSummaryRow(canvas, "作廢總額", "${totalVoidAmount.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    _drawSummaryRow(canvas, "作廢現金", "0", startX, y, contentWidth, 0, styleLabel, styleLabel); // Basic stub
+    y += 35;
+
+    // 預付訂金
+    y += 10;
+    _drawSummaryRow(canvas, "預付訂金", "${depositsRedeemed.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+
+    // 現金短溢 (Shortage)
+    y += 10;
+    double shortage = cashDifference < 0 ? cashDifference.abs() : 0.0;
+    _drawSummaryRow(canvas, "現金短溢", "${shortage.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    
+    // 總折扣讓
+    y += 10;
+    _drawSummaryRow(canvas, "總折扣讓", "${totalDiscount.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+
+    // 銷售總額
+    double totalSales = totalRevenue + totalDiscount;
+    y += 10;
+    _drawSummaryRow(canvas, "銷售總額", "${totalSales.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleCategory, styleValueBig);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    _drawSummaryRow(canvas, "+ 營業額", "${totalRevenue.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    _drawSummaryRow(canvas, "+ 總折扣讓", "${totalDiscount.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 45;
+
+    // 交易 Block
+    _drawText(canvas, "交易", startX, y, contentWidth, styleCategory);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    _drawSummaryRow(canvas, "總交易單數", "$totalTransactions", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    _drawSummaryRow(canvas, "總交易金額", "${totalRevenue.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    _drawSummaryRow(canvas, "總作廢交易單數", "$voidTransactions", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    _drawSummaryRow(canvas, "總作廢交易金額", "${totalVoidAmount.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 45;
+
+    // 其他 Block
+    _drawText(canvas, "其他", startX, y, contentWidth, styleCategory);
+    y += 35;
+    _drawDivider(canvas, width, y);
+    y += 15;
+    _drawSummaryRow(canvas, "來客數", "$totalGuests", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    
+    int qtySold = 0;
+    final List<dynamic> salesArray = rpcData['itemized_sales'] ?? [];
+    for(var cat in salesArray) {
+      for(var item in (cat['items'] ?? [])) {
+        qtySold += (item['qty'] as num?)?.toInt() ?? 0;
+      }
+    }
+    
+    _drawSummaryRow(canvas, "銷售數量", "$qtySold", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    
+    double avgSpendGuest = totalGuests > 0 ? totalRevenue / totalGuests : 0;
+    _drawSummaryRow(canvas, "平均客單價", "${avgSpendGuest.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 35;
+    
+    double avgSpendTrans = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+    _drawSummaryRow(canvas, "平均單價", "${avgSpendTrans.toStringAsFixed(0)}", startX, y, contentWidth, 0, styleLabel, styleLabel);
+    y += 50;
+
+    _drawDivider(canvas, width, y);
+    y += 40;
+
+    final picture = recorder.endRecording();
+    final imgObj = await picture.toImage(width.toInt(), y.toInt());
+    final byteData = await imgObj.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
   }
 }

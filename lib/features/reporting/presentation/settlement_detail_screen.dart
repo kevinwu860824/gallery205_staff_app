@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:gallery205_staff_app/l10n/app_localizations.dart';
+import 'package:gallery205_staff_app/core/services/printer_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // -------------------------------------------------------------------
 // 2. SettlementDetailScreen
@@ -22,6 +24,7 @@ class SettlementDetailScreen extends StatefulWidget {
 
 class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
   bool _isLoading = true;
+  bool _isPrinting = false;
   Map<String, dynamic>? _txData; 
   Map<String, dynamic>? _openData; 
   final currencyFormat = NumberFormat('#,##0', 'en_US'); 
@@ -54,6 +57,51 @@ class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
         );
         context.pop(); 
       }
+    }
+  }
+
+  Future<void> _reprintSettlement(num receivableCash, num cashDifference) async {
+    if (_isPrinting) return;
+    setState(() => _isPrinting = true);
+    
+    try {
+       final prefs = await SharedPreferences.getInstance();
+       final shopId = prefs.getString('savedShopId') ?? '';
+       final currentUserName = prefs.getString('savedUserName') ?? 'Staff';
+       
+       if (shopId.isEmpty) throw Exception("Shop ID missing");
+
+       final openId = _openData!['id'];
+
+       final rpcData = await Supabase.instance.client.rpc('rpc_get_shift_settlement_data', params: {
+         'p_shop_id': shopId,
+         'p_open_id': openId,
+       });
+
+       final uiData = {
+          'paidInCash': receivableCash.toDouble(),
+          'cashDifference': cashDifference.toDouble(),
+          'depositsRedeemed': 0.0,
+       };
+
+       final printerService = PrinterService();
+       await printerService.printSettlementRecords(
+          shopId: shopId,
+          staffName: currentUserName,
+          rpcData: rpcData as Map<String, dynamic>,
+          uiData: uiData,
+       );
+       
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('補印指令已發送至出單機')));
+       }
+    } catch (e) {
+       debugPrint('Failed to reprint settlement: $e');
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('補印失敗: $e')));
+       }
+    } finally {
+       if (mounted) setState(() => _isPrinting = false);
     }
   }
 
@@ -130,7 +178,15 @@ class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 32), 
+                  _isPrinting 
+                    ? Padding(padding: const EdgeInsets.only(right: 8.0), child: CupertinoActivityIndicator(color: colorScheme.onSurface))
+                    : CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        minSize: 0,
+                        child: Icon(CupertinoIcons.printer, color: colorScheme.onSurface, size: 28),
+                        onPressed: () => _reprintSettlement(receivableCash, cashDifference),
+                      ),
+                  const SizedBox(width: 8), 
                 ],
               ),
             ),

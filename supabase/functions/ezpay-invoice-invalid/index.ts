@@ -87,7 +87,8 @@ serve(async (req) => {
 
         // 4. Encrypt
         const aesEncrypted = await encrypt(queryString, ezpaySettings.hash_key, ezpaySettings.hash_iv);
-        const checkValue = await sha256(`HashKey=${ezpaySettings.hash_key}&${aesEncrypted}&HashIV=${ezpaySettings.hash_iv}`);
+        // ezPay E-Invoice CheckValue is HashKey + PostData + HashIV -> SHA256
+        const checkValue = await sha256(`${ezpaySettings.hash_key}${aesEncrypted}${ezpaySettings.hash_iv}`);
 
         // 5. Call ezPay API
         // IMPORTANT: In production, ensure EZPAY_INVALID_URL is set to https://einvoice.ezpay.com.tw/Api/invoice_invalid
