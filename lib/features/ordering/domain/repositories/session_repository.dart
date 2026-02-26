@@ -9,7 +9,7 @@ abstract class SessionRepository {
   Future<List<TableModel>> fetchTablesInArea(String areaId);
 
   /// Updates the pax count for an order group (Session).
-  Future<void> updatePax(String orderGroupId, int newPax);
+  Future<void> updatePax(String orderGroupId, int newPax, {int adult = 0, int child = 0});
 
   /// Clears a table (marks order/session as completed).
   Future<void> clearSession(Map<String, dynamic> tableData, {String? targetGroupId});

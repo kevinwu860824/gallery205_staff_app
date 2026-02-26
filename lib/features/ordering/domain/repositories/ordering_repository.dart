@@ -50,7 +50,7 @@ abstract class OrderingRepository {
   });
 
   /// Updates the pax count for an order group.
-  Future<void> updateOrderGroupPax(String orderGroupId, int newPax);
+  Future<void> updateOrderGroupPax(String orderGroupId, int newPax, {int adult = 0, int child = 0});
 
   /// Updates the note for an order group.
   Future<void> updateOrderGroupNote(String orderGroupId, String note);

@@ -200,7 +200,7 @@ class SettingsScreen extends ConsumerWidget {
           'title': l10n.settingCategoryPersonnel,
           'icon': CupertinoIcons.person_2_fill,
           'options': personnelOptions,
-          'color': const Color(0xFF5C7A6B),
+          'color': _getCategoryColor(context, 'personnel'),
         },
       if (menuInvOptions.isNotEmpty)
         {
@@ -208,7 +208,7 @@ class SettingsScreen extends ConsumerWidget {
           'title': l10n.settingCategoryMenuInv,
           'icon': CupertinoIcons.square_grid_2x2_fill,
           'options': menuInvOptions,
-          'color': const Color(0xFF6B8E7D),
+          'color': _getCategoryColor(context, 'menuInv'),
         },
       if (equipTableOptions.isNotEmpty)
         {
@@ -216,14 +216,14 @@ class SettingsScreen extends ConsumerWidget {
           'title': l10n.settingCategoryEquipTable,
           'icon': CupertinoIcons.wrench_fill,
           'options': equipTableOptions,
-          'color': const Color(0xFF7A9E8E),
+          'color': _getCategoryColor(context, 'equipTable'),
         },
       {
         'id': 'system',
         'title': l10n.settingCategorySystem,
         'icon': CupertinoIcons.settings_solid,
         'options': systemOptions,
-        'color': const Color(0xFF8DA399),
+        'color': _getCategoryColor(context, 'system'),
       },
     ];
 
@@ -415,6 +415,46 @@ class SettingsScreen extends ConsumerWidget {
         });
       },
     );
+  }
+
+  // UI 輔助函式：根據主題動態獲取分類顏色
+  Color _getCategoryColor(BuildContext context, String categoryId) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color bg = Theme.of(context).scaffoldBackgroundColor;
+    
+    // 判斷是否為 Sage 模式 (透過背景色判斷，Sage 背景是 0xFF8DA399)
+    final bool isSage = bg.value == 0xFF8DA399;
+
+    if (isSage) {
+      // Sage 模式：品牌綠色系
+      switch (categoryId) {
+        case 'personnel': return const Color(0xFF5C7A6B); // 深綠
+        case 'menuInv': return const Color(0xFF6B8E7D);   // 中綠
+        case 'equipTable': return const Color(0xFF7A9E8E); // 淺綠
+        case 'system': return const Color(0xFFADC4B9);     // 淡灰綠
+        default: return const Color(0xFF5C7A6B);
+      }
+    }
+
+    if (!isDark) {
+      // Light 模式：鮮豔辨識度高
+      switch (categoryId) {
+        case 'personnel': return const Color(0xFF007AFF); // iOS Blue
+        case 'menuInv': return const Color(0xFF34C759);   // iOS Green
+        case 'equipTable': return const Color(0xFFFF9500); // iOS Orange
+        case 'system': return const Color(0xFF5856D6);     // iOS Indigo
+        default: return Colors.blue;
+      }
+    } else {
+      // Dark 模式：柔和霓虹感
+      switch (categoryId) {
+        case 'personnel': return const Color(0xFF0A84FF);
+        case 'menuInv': return const Color(0xFF30D158);
+        case 'equipTable': return const Color(0xFFFF9F0A);
+        case 'system': return const Color(0xFF5E5CE6);
+        default: return Colors.blueAccent;
+      }
+    }
   }
 
   // UI 輔助函式：建立列表選項 (保留給其他可能的用途或登出)

@@ -50,19 +50,16 @@ class KitchenTicketServiceImpl implements KitchenTicketService {
           print("KitchenTicketService: Failed to get seq number: $e");
        }
        
-       // 2. Construct Context
-       final orderGroup = OrderGroup(
-          id: event.orderGroupId,
-          status: OrderStatus.dining,
-          items: event.items,
-          shopId: shopId,
-       );
-       
-       final orderContext = OrderContext(
-          order: orderGroup,
-          tableNames: event.tableNumbers,
-          peopleCount: 1,
-          staffName: event.staffName ?? '',
+       // 2. Fetch Full Context (to get correct pax values)
+       final fullContext = await orderingRepository.getOrderContext(event.orderGroupId);
+       if (fullContext == null) {
+          print("KitchenTicketService: Could not fetch context for ${event.orderGroupId}");
+          return;
+       }
+
+       // 2b. Filter out only the items from THIS event to prevent duplicate printing of old items
+       final orderContext = fullContext.copyWith(
+          order: fullContext.order.copyWith(items: event.items),
        );
 
        // 3. Process Printing

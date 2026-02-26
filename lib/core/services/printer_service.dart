@@ -335,7 +335,7 @@ class PrinterService {
     y += barHeight + 20; // Add extra spacing after big bar
     
     // 3. Pax Info
-    _drawText(canvas, "人數：${context.peopleCount} 大 0 小", x, y, contentWidth, styleLabel);
+    _drawText(canvas, "人數：${context.paxAdult} 大 ${context.paxChild} 小", x, y, contentWidth, styleLabel);
     y += 30;
 
     _drawDivider(canvas, width, y); // Divider spans full width

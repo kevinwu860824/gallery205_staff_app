@@ -274,45 +274,175 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
   // 顯示「開桌」的人數輸入視窗
   Future<void> _showPaxDialog() async {
     setState(() => _isDialogOpen = true);
-    final paxController = TextEditingController();
     
-    final result = await showDialog<int>(
+    // 預設 0 大 0 小
+    final adultController = TextEditingController(text: '0');
+    final childController = TextEditingController(text: '0');
+    
+    final result = await showDialog<Map<String, int>>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _DarkStyleDialog(
-        title: '入座確認: ${_selectedEmptyTables.join(", ")}',
-        contentWidget: Column(
-          children: [
-            Text('請輸入用餐人數', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-            const SizedBox(height: 16),
-            CupertinoTextField(
-              controller: paxController,
-              keyboardType: TextInputType.number,
-              placeholder: '人數',
-              autofocus: true,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary,
-                borderRadius: BorderRadius.circular(8),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return _DarkStyleDialog(
+              title: '入座確認: ${_selectedEmptyTables.join(", ")}',
+              contentWidget: Column(
+                children: [
+                  Text('請輸入用餐人數', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+                  const SizedBox(height: 24),
+                  
+                  // 大人行
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('大人', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.minus_circle_fill),
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                            iconSize: 32,
+                            onPressed: () {
+                              int val = int.tryParse(adultController.text) ?? 0;
+                              if (val > 0) adultController.text = (val - 1).toString();
+                            },
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: CupertinoTextField(
+                              controller: adultController,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
+                              decoration: null,
+                              padding: EdgeInsets.zero,
+                              onChanged: (value) {
+                                // 如果原本是 "0" 且輸入了一個字元變成兩位數，則直接取那個新的數字
+                                if (value.length > 1 && value.contains('0')) {
+                                   final newDigit = value.replaceFirst('0', '');
+                                   if (newDigit.length == 1) {
+                                      adultController.text = newDigit;
+                                      adultController.selection = TextSelection.fromPosition(
+                                        TextPosition(offset: adultController.text.length),
+                                      );
+                                      return;
+                                   }
+                                }
+                                
+                                // 原本的領頭 0 處理
+                                if (value.length > 1 && value.startsWith('0')) {
+                                  final n = int.tryParse(value);
+                                  if (n != null) {
+                                    adultController.text = n.toString();
+                                    adultController.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: adultController.text.length),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.plus_circle_fill),
+                            color: Colors.black, // Changed to black per user request
+                            iconSize: 32,
+                            onPressed: () {
+                              int val = int.tryParse(adultController.text) ?? 0;
+                              adultController.text = (val + 1).toString();
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // 小孩行
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('小孩', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.minus_circle_fill),
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                            iconSize: 32,
+                            onPressed: () {
+                               int val = int.tryParse(childController.text) ?? 0;
+                               if (val > 0) childController.text = (val - 1).toString();
+                            },
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: CupertinoTextField(
+                              controller: childController,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
+                              decoration: null,
+                              padding: EdgeInsets.zero,
+                              onChanged: (value) {
+                                if (value.length > 1 && value.contains('0')) {
+                                   final newDigit = value.replaceFirst('0', '');
+                                   if (newDigit.length == 1) {
+                                      childController.text = newDigit;
+                                      childController.selection = TextSelection.fromPosition(
+                                        TextPosition(offset: childController.text.length),
+                                      );
+                                      return;
+                                   }
+                                }
+                                if (value.length > 1 && value.startsWith('0')) {
+                                  final n = int.tryParse(value);
+                                  if (n != null) {
+                                    childController.text = n.toString();
+                                    childController.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: childController.text.length),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.plus_circle_fill),
+                            color: Colors.black, // Changed to black per user request
+                            iconSize: 32,
+                            onPressed: () {
+                              int val = int.tryParse(childController.text) ?? 0;
+                              childController.text = (val + 1).toString();
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-        onCancel: () => Navigator.pop(context),
-        onConfirm: () {
-          final pax = int.tryParse(paxController.text);
-          if (pax != null && pax > 0) {
-            Navigator.pop(context, pax);
-          }
-        },
-      ),
+              onCancel: () => Navigator.pop(context),
+              onConfirm: () {
+                final adultPax = int.tryParse(adultController.text) ?? 0;
+                final childPax = int.tryParse(childController.text) ?? 0;
+                final totalPax = adultPax + childPax;
+                if (totalPax > 0) {
+                  Navigator.pop(context, {'pax': totalPax, 'adult': adultPax, 'child': childPax});
+                } else {
+                  // Must have at least 1 person
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("人數必須大於 0")));
+                }
+              },
+            );
+          },
+        );
+      },
     );
 
     if (result == null) {
       setState(() => _isDialogOpen = false);
     } else {
-      await _createNewOrderGroup(result);
+      await _createNewOrderGroup(result['pax']!, result['adult']!, result['child']!);
       setState(() => _isDialogOpen = false);
     }
   }
@@ -344,29 +474,13 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
     }
   }
 
-  Future<void> _createNewOrderGroup(int pax) async {
+  Future<void> _createNewOrderGroup(int pax, int adult, int child) async {
     setState(() => isLoading = true);
     try {
       final prefs = await SharedPreferences.getInstance();
       final shopId = prefs.getString('savedShopId');
       
       if (shopId != null) {
-        // Use Repository indirectly? Or DataSource?
-        // Actually Repository submitOrder handles create logic but specifically for Order Submission.
-        // We create an Empty Order Group here. Repository doesn't expose createOrderGroup strictly.
-        // let's add `createEmptyOrderGroup` to Repository or use RemoteDataSource via Repo?
-        // To follow refactor plan strictly, we might want to move this to Repository too.
-        // For now, let's keep this as is OR move to repository.
-        // To speed up, let's just fix the CLEAR TABLE and UPDATE functions first as requested.
-        
-        // Wait, the plan said "Refactor Screens to use Repository".
-        // Let's refactor this too.
-        
-        // However, I didn't add createOrderGroup to Repository Interface yet.
-        // Let's stick to the ones I added: clearTable, updatePax, updateNote.
-        
-        // Re-implement existing logic using direct Supabase for creation (unchanged for now)
-        // OR add to logic.
         String? currentOpenId;
         try {
           final res = await Supabase.instance.client.rpc(
@@ -400,6 +514,8 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
           'shop_id': shopId,
           'table_names': _selectedEmptyTables.toList(),
           'pax': pax,
+          'pax_adult': adult,
+          'pax_child': child,
           'status': 'dining', // Use Constant later
           'open_id': currentOpenId,
           'tax_snapshot': taxSnapshot,
@@ -877,51 +993,194 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
 
   // [功能 2] 調整人數
   Future<void> _showUpdatePaxDialog(String orderGroupId) async {
-    int currentPax = 0;
+    int initialAdult = 0;
+    int initialChild = 0;
+
     try {
       final res = await Supabase.instance.client
           .from('order_groups')
-          .select('pax')
+          .select('pax, pax_adult, pax_child')
           .eq('id', orderGroupId)
           .single();
-      currentPax = res['pax'] ?? 0;
+          
+      final int currentPax = res['pax'] ?? 0;
+      
+      if (res['pax_adult'] != null) {
+        initialAdult = res['pax_adult'] ?? 0;
+        initialChild = res['pax_child'] ?? 0;
+      } else {
+        // Fallback for old orders
+        initialAdult = currentPax;
+        initialChild = 0;
+      }
     } catch (e) {
       debugPrint("無法讀取目前人數: $e");
     }
 
     if (!mounted) return;
 
-    final paxController = TextEditingController(text: currentPax.toString());
+    final adultController = TextEditingController(text: initialAdult.toString());
+    final childController = TextEditingController(text: initialChild.toString());
 
     await showDialog(
       context: context,
-      builder: (context) => _DarkStyleDialog(
-        title: "調整人數",
-        contentWidget: CupertinoTextField(
-          controller: paxController,
-          keyboardType: TextInputType.number,
-          placeholder: "輸入新的人數",
-          padding: const EdgeInsets.all(12),
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
-          autofocus: true,
-          decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondary, borderRadius: BorderRadius.circular(8)),
-        ),
-        onCancel: () => Navigator.pop(context),
-        onConfirm: () async {
-          final newPax = int.tryParse(paxController.text);
-          if (newPax != null && newPax > 0) {
-            try {
-              if (_sessionRepo == null) await _ensureRepository();
-              await _sessionRepo!.updatePax(orderGroupId, newPax);
-              
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("人數已更新")));
-            } catch (e) {
-              debugPrint("更新人數失敗: $e");
-            }
-          }
-          if (mounted) Navigator.pop(context);
-        },
-      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return _DarkStyleDialog(
+              title: "調整人數",
+              contentWidget: Column(
+                children: [
+                  // 大人行
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('大人', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.minus_circle_fill),
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                            iconSize: 32,
+                            onPressed: () {
+                               int val = int.tryParse(adultController.text) ?? 0;
+                               if (val > 0) adultController.text = (val - 1).toString();
+                            },
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: CupertinoTextField(
+                              controller: adultController,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
+                              decoration: null,
+                              padding: EdgeInsets.zero,
+                              onChanged: (value) {
+                                if (value.length > 1 && value.contains('0')) {
+                                   final newDigit = value.replaceFirst('0', '');
+                                   if (newDigit.length == 1) {
+                                      adultController.text = newDigit;
+                                      adultController.selection = TextSelection.fromPosition(
+                                        TextPosition(offset: adultController.text.length),
+                                      );
+                                      return;
+                                   }
+                                }
+                                if (value.length > 1 && value.startsWith('0')) {
+                                  final n = int.tryParse(value);
+                                  if (n != null) {
+                                    adultController.text = n.toString();
+                                    adultController.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: adultController.text.length),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.plus_circle_fill),
+                            color: Colors.black, // Changed to black per user request
+                            iconSize: 32,
+                            onPressed: () {
+                              int val = int.tryParse(adultController.text) ?? 0;
+                              adultController.text = (val + 1).toString();
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // 小孩行
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('小孩', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.minus_circle_fill),
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                            iconSize: 32,
+                            onPressed: () {
+                              int val = int.tryParse(childController.text) ?? 0;
+                              if (val > 0) childController.text = (val - 1).toString();
+                            },
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: CupertinoTextField(
+                              controller: childController,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
+                              decoration: null,
+                              padding: EdgeInsets.zero,
+                              onChanged: (value) {
+                                if (value.length > 1 && value.contains('0')) {
+                                   final newDigit = value.replaceFirst('0', '');
+                                   if (newDigit.length == 1) {
+                                      childController.text = newDigit;
+                                      childController.selection = TextSelection.fromPosition(
+                                        TextPosition(offset: childController.text.length),
+                                      );
+                                      return;
+                                   }
+                                }
+                                if (value.length > 1 && value.startsWith('0')) {
+                                  final n = int.tryParse(value);
+                                  if (n != null) {
+                                    childController.text = n.toString();
+                                    childController.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: childController.text.length),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(CupertinoIcons.plus_circle_fill),
+                            color: Colors.black, // Changed to black per user request
+                            iconSize: 32,
+                            onPressed: () {
+                               int val = int.tryParse(childController.text) ?? 0;
+                               childController.text = (val + 1).toString();
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              onCancel: () => Navigator.pop(context),
+              onConfirm: () async {
+                final adultVal = int.tryParse(adultController.text) ?? 0;
+                final childVal = int.tryParse(childController.text) ?? 0;
+                final newPax = adultVal + childVal;
+                
+                if (newPax > 0) {
+                  try {
+                    if (_sessionRepo == null) await _ensureRepository();
+                    await _sessionRepo!.updatePax(orderGroupId, newPax, adult: adultVal, child: childVal);
+                    
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("人數已更新")));
+                  } catch (e) {
+                    debugPrint("更新人數失敗: $e");
+                  }
+                  if (mounted) Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("人數必須大於 0")));
+                }
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -961,11 +1220,15 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
         contentWidget: CupertinoTextField(
           controller: noteController,
           placeholder: "例如：VIP、壽星、不吃牛...",
+          placeholderStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4), fontSize: 16),
           maxLines: 3,
           padding: const EdgeInsets.all(12),
           style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
           autofocus: true,
-          decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondary, borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.1), 
+            borderRadius: BorderRadius.circular(8),
+          ),
         ),
         onCancel: () => Navigator.pop(context),
         onConfirm: () async {
