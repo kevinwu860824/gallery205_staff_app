@@ -586,7 +586,14 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
         // We add a timeout to prevent hanging if a printer is unreachable
         await printerService.printBill(
-          context: orderContext,
+          context: OrderContext(
+            order: orderContext.order,
+            tableNames: orderContext.tableNames,
+            peopleCount: orderContext.peopleCount,
+            paxAdult: orderContext.order.paxAdult,
+            paxChild: orderContext.order.paxChild,
+            staffName: orderContext.staffName,
+          ),
           items: _itemDetails,
           printerSettings: printerSettings,
           subtotal: _subtotal,
@@ -680,8 +687,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                           if (payments.isNotEmpty)
                             Container(
                               width: double.infinity,
-                              color: Colors.white.withValues(alpha: 0.05),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                               child: Column(
                                 children: payments.asMap().entries.map((entry) {
                                   final index = entry.key;
@@ -720,19 +727,19 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                             if (_taxProfile != null && _taxProfile!.rate == 5.0) ...[
                               Row(
                                 children: [
-                                  const Icon(CupertinoIcons.doc_plaintext, size: 20, color: Colors.white),
+                                  Icon(CupertinoIcons.doc_plaintext, size: 20, color: Theme.of(context).colorScheme.onSurface),
                                   const SizedBox(width: 8),
-                                  const Text("電子發票設定", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                                  Text("電子發票設定", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 16)),
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              Divider(height: 1, color: Colors.white.withValues(alpha: 0.3)),
+                              Divider(height: 1, color: Theme.of(context).dividerColor),
                               const SizedBox(height: 16),
                               Row(
                                 children: [
                                   SizedBox(
                                     width: 70,
-                                    child: const Text("統一編號", style: TextStyle(color: Colors.white, fontSize: 15))
+                                    child: Text("統一編號", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 15))
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -740,18 +747,18 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                       controller: ubnController,
                                       keyboardType: TextInputType.number,
                                       maxLength: 8,
-                                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
                                       inputFormatters: [
                                         FilteringTextInputFormatter.digitsOnly,
                                         LengthLimitingTextInputFormatter(8),
                                       ],
                                       decoration: InputDecoration(
                                         hintText: "8 碼統編 (選填)",
-                                        hintStyle: const TextStyle(color: Colors.white70),
+                                        hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                                         counterText: "",
                                         isDense: true,
                                         filled: true,
-                                        fillColor: Colors.white.withValues(alpha: 0.15),
+                                        fillColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                       ),
@@ -764,7 +771,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                 children: [
                                   SizedBox(
                                     width: 70,
-                                    child: const Text("手機載具", style: TextStyle(color: Colors.white, fontSize: 15))
+                                    child: Text("手機載具", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 15))
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -773,13 +780,13 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withValues(alpha: 0.15),
+                                          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                           borderRadius: BorderRadius.circular(8),
                                           border: Border.all(color: carrierNumController.text.isEmpty ? Colors.transparent : Colors.greenAccent.withValues(alpha: 0.8), width: 1.5),
                                         ),
                                         child: Row(
                                           children: [
-                                            Icon(CupertinoIcons.camera, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+                                            Icon(CupertinoIcons.camera, size: 18, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
@@ -787,8 +794,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                                 style: TextStyle(
                                                   fontSize: 16,
                                                   color: carrierNumController.text.isEmpty 
-                                                    ? Colors.white70
-                                                    : Colors.white,
+                                                    ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)
+                                                    : Theme.of(context).colorScheme.onSurface,
                                                   fontWeight: carrierNumController.text.isEmpty ? FontWeight.normal : FontWeight.bold,
                                                 ),
                                               ),
@@ -802,7 +809,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                                     carrierNumController.clear();
                                                   });
                                                 },
-                                                child: Icon(CupertinoIcons.clear_thick_circled, size: 20, color: Colors.white.withValues(alpha: 0.5)),
+                                                child: Icon(CupertinoIcons.clear_thick_circled, size: 20, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
                                               ),
                                             ]
                                           ],
@@ -827,16 +834,16 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                       return Padding(
                                         padding: const EdgeInsets.only(right: 8),
                                         child: ChoiceChip(
-                                          label: Text(m, style: const TextStyle(fontSize: 15, color: Colors.white)),
+                                          label: Text(m, style: TextStyle(fontSize: 15, color: isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface)),
                                           selected: isSelected,
                                           showCheckmark: isSelected,
                                           checkmarkColor: Theme.of(context).colorScheme.primary,
-                                          selectedColor: Colors.transparent,
+                                          selectedColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                           backgroundColor: Colors.transparent,
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                           shape: RoundedRectangleBorder(
                                             borderRadius: BorderRadius.circular(8),
-                                            side: BorderSide(color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white.withValues(alpha: 0.5)),
+                                            side: BorderSide(color: isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
                                           ),
                                           onSelected: (val) {
                                             setState(() {
@@ -857,24 +864,24 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                     child: TextField(
                                       controller: amountController,
                                       keyboardType: TextInputType.number,
-                                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
                                       decoration: InputDecoration(
                                         labelText: "金額",
-                                        labelStyle: const TextStyle(color: Colors.white70),
+                                        labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
                                         border: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Colors.white)
+                                          borderSide: BorderSide(color: Theme.of(context).dividerColor)
                                         ),
                                         enabledBorder: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Colors.white)
+                                          borderSide: BorderSide(color: Theme.of(context).dividerColor)
                                         ),
                                         focusedBorder: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(8),
-                                          borderSide: const BorderSide(color: Colors.white, width: 2)
+                                          borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2)
                                         ),
                                         prefixText: '\$ ',
-                                        prefixStyle: const TextStyle(color: Colors.white, fontSize: 18),
+                                        prefixStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                                       ),
                                     ),
@@ -886,21 +893,21 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                         controller: refController,
                                         keyboardType: TextInputType.number,
                                         maxLength: 4,
-                                        style: const TextStyle(color: Colors.white, fontSize: 18),
+                                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18),
                                         decoration: InputDecoration(
                                           labelText: "末四碼",
-                                          labelStyle: const TextStyle(color: Colors.white70),
+                                          labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
                                           border: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(8),
-                                            borderSide: const BorderSide(color: Colors.white)
+                                            borderSide: BorderSide(color: Theme.of(context).dividerColor)
                                           ),
                                           enabledBorder: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(8),
-                                            borderSide: const BorderSide(color: Colors.white)
+                                            borderSide: BorderSide(color: Theme.of(context).dividerColor)
                                           ),
                                           focusedBorder: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(8),
-                                            borderSide: const BorderSide(color: Colors.white, width: 2)
+                                            borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2)
                                           ),
                                           counterText: "",
                                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -919,10 +926,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                                         height: 52,
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
-                                          color: Colors.white.withValues(alpha: 0.15),
-                                          border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                                          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                                          border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
                                         ),
-                                        child: const Icon(CupertinoIcons.add, color: Colors.white, size: 24),
+                                        child: Icon(CupertinoIcons.add, color: Theme.of(context).colorScheme.primary, size: 24),
                                       ),
                                     ),
                                   )
@@ -937,9 +944,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                               child: ElevatedButton(
                                 onPressed: isComplete && !isLoading ? _processPayment : null,
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white.withValues(alpha: 0.2), 
-                                  foregroundColor: Theme.of(context).colorScheme.onSurface,
-                                  disabledBackgroundColor: Colors.white.withValues(alpha: 0.05),
+                                  backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: isComplete ? 1.0 : 0.1), 
+                                  foregroundColor: isComplete ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+                                  disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
                                   disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                                   elevation: 0,

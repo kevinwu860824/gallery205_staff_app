@@ -123,6 +123,8 @@ class OrderContextMapper {
       ezpayQrRight: groupRow['ezpay_qr_right'],
       finalAmount: (groupRow['final_amount'] as num?)?.toDouble(),
       buyerUbn: groupRow['buyer_ubn']?.toString(),
+      paxAdult: groupRow['pax_adult'] ?? 0,
+      paxChild: groupRow['pax_child'] ?? 0,
     );
 
     // 2. Construct OrderContext (Operations)
@@ -130,6 +132,8 @@ class OrderContextMapper {
       order: order,
       tableNames: List<String>.from(groupRow['table_names'] ?? []),
       peopleCount: groupRow['pax'] ?? 0,
+      paxAdult: groupRow['pax_adult'] ?? 0,
+      paxChild: groupRow['pax_child'] ?? 0,
     );
   }
 

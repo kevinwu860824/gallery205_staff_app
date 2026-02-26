@@ -298,12 +298,12 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
   }
 
   @override
-  Future<void> updateOrderGroupPax(String orderGroupId, int newPax) async {
+  Future<void> updateOrderGroupPax(String orderGroupId, int newPax, {int adult = 0, int child = 0}) async {
     // Direct DB call or DataSource? Use DataSource if possible, but simple update is fine here too.
     // Let's iterate: move DB logic to DataSource later if strict. For now, keep Repository as the Logic Hub.
     await remoteDataSource.supabaseClient
         .from('order_groups')
-        .update({'pax': newPax})
+        .update({'pax': newPax, 'pax_adult': adult, 'pax_child': child})
         .eq('id', orderGroupId);
   }
 
@@ -693,8 +693,8 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
   // --- SessionRepository Implementation (Redirects) ---
 
   @override
-  Future<void> updatePax(String orderGroupId, int newPax) {
-    return updateOrderGroupPax(orderGroupId, newPax);
+  Future<void> updatePax(String orderGroupId, int newPax, {int adult = 0, int child = 0}) {
+    return updateOrderGroupPax(orderGroupId, newPax, adult: adult, child: child);
   }
 
   @override

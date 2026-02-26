@@ -18,8 +18,10 @@ class OrderGroup extends Equatable {
   final String? ezpayRandomNum;
   final String? ezpayQrLeft;
   final String? ezpayQrRight;
-  final double? finalAmount;
   final String? buyerUbn;
+  final double? finalAmount;
+  final int paxAdult;
+  final int paxChild;
   
   const OrderGroup({
     required this.id,
@@ -37,6 +39,8 @@ class OrderGroup extends Equatable {
     this.ezpayQrRight,
     this.finalAmount,
     this.buyerUbn,
+    this.paxAdult = 0,
+    this.paxChild = 0,
   });
 
   @override
@@ -54,7 +58,47 @@ class OrderGroup extends Equatable {
     ezpayRandomNum,
     ezpayQrLeft,
     ezpayQrRight,
-    finalAmount,
-    buyerUbn,
+    paxAdult,
+    paxChild,
   ];
+
+  OrderGroup copyWith({
+    String? id,
+    OrderStatus? status,
+    List<OrderItem>? items,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    String? shopId,
+    Map<String, dynamic>? taxSnapshot,
+    String? staffName,
+    DateTime? checkoutTime,
+    String? ezpayInvoiceNumber,
+    String? ezpayRandomNum,
+    String? ezpayQrLeft,
+    String? ezpayQrRight,
+    double? finalAmount,
+    String? buyerUbn,
+    int? paxAdult,
+    int? paxChild,
+  }) {
+    return OrderGroup(
+      id: id ?? this.id,
+      status: status ?? this.status,
+      items: items ?? this.items,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      shopId: shopId ?? this.shopId,
+      taxSnapshot: taxSnapshot ?? this.taxSnapshot,
+      staffName: staffName ?? this.staffName,
+      checkoutTime: checkoutTime ?? this.checkoutTime,
+      ezpayInvoiceNumber: ezpayInvoiceNumber ?? this.ezpayInvoiceNumber,
+      ezpayRandomNum: ezpayRandomNum ?? this.ezpayRandomNum,
+      ezpayQrLeft: ezpayQrLeft ?? this.ezpayQrLeft,
+      ezpayQrRight: ezpayQrRight ?? this.ezpayQrRight,
+      finalAmount: finalAmount ?? this.finalAmount,
+      buyerUbn: buyerUbn ?? this.buyerUbn,
+      paxAdult: paxAdult ?? this.paxAdult,
+      paxChild: paxChild ?? this.paxChild,
+    );
+  }
 }
