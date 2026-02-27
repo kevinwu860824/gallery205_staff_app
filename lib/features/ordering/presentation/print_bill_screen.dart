@@ -92,14 +92,75 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
       }
 
       // 2. Fetch Active Items
+      // Changed to pass to items list, then we manually consolidate and order
       final itemsRes = await supabase
           .from('order_items')
           .select() // Selects all, including modifiers
           .eq('order_group_id', widget.groupKey)
           .neq('status', 'cancelled')
-          .order('created_at');
+          .order('created_at', ascending: true); // Ascending: earliest first (from top to bottom)
           
-      items = List<Map<String, dynamic>>.from(itemsRes);
+      final List<Map<String, dynamic>> rawItemsList = List<Map<String, dynamic>>.from(itemsRes);
+      
+      // Helper function to generate visual identity key
+      String getVisualIdentity(Map<String, dynamic> item) {
+         final String name = (item['item_name'] ?? '').toString().trim();
+         final double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+         
+         final String note = (item['note'] ?? '').toString()
+             .replaceAll(RegExp(r'\| 刪除:.*'), '')
+             .trim();
+             
+         final List<dynamic> mods = item['modifiers'] ?? item['selected_modifiers'] ?? [];
+         final List<String> modNames = mods
+             .map((m) => (m is Map ? m['name']?.toString() ?? '' : m.toString()).trim())
+             .where((n) => n.isNotEmpty)
+             .toList()
+             ..sort();
+         final String modStr = modNames.join('|');
+         
+         // In PrintBill we merge similar items within the same seconds
+         final String cAtStr = item['created_at']?.toString() ?? '';
+         String batchKey = '';
+         if (cAtStr.isNotEmpty) {
+             final dt = DateTime.parse(cAtStr).toLocal();
+             batchKey = "${dt.year}/${dt.month}/${dt.day} ${dt.hour}:${dt.minute}:${dt.second}";
+         }
+         
+         // Merge logic ignores status since they are all non-cancelled, but consider original_price (招待)
+         final String oPrice = item['original_price']?.toString() ?? '';
+
+         return "$name|$price|$note|$modStr|$batchKey|$oPrice";
+      }
+
+      List<Map<String, dynamic>> consolidated = [];
+      
+      for (var item in rawItemsList) {
+        bool found = false;
+        final String identity = getVisualIdentity(item);
+        
+        for (var c in consolidated) {
+           if (identity == getVisualIdentity(c)) {
+              c['quantity'] = (c['quantity'] as num).toInt() + (item['quantity'] as num).toInt();
+              
+              // Store all source IDs to allow batch deletion / toggle treat
+              List<String> sIds = List<String>.from(c['_source_ids'] ?? [c['id']]);
+              sIds.add(item['id']);
+              c['_source_ids'] = sIds;
+              
+              found = true;
+              break;
+           }
+        }
+        
+        if (!found) {
+           final newItem = Map<String, dynamic>.from(item);
+           newItem['_source_ids'] = [item['id']];
+           consolidated.add(newItem);
+        }
+      }
+      
+      items = consolidated;
       
       // 3. Fetch Tax Profile (Prefer Snapshot)
       final snapshot = groupRes['tax_snapshot'];
@@ -155,7 +216,7 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
   }
 
   // Action: Delete Item (Swipe Left) with Confirmation
-  Future<void> _deleteItem(String itemId) async {
+  Future<void> _deleteItem(Map<String, dynamic> combinedItem) async {
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -172,14 +233,16 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
     if (confirm != true) return;
 
     final supabase = Supabase.instance.client;
+    final List<String> itemIds = List<String>.from(combinedItem['_source_ids'] ?? [combinedItem['id']]);
+
     try {
       await supabase.from('order_items').update({
         'status': 'cancelled',
         'updated_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', itemId);
+      }).inFilter('id', itemIds);
       
       setState(() {
-        items.removeWhere((item) => item['id'] == itemId);
+        items.removeWhere((item) => item['id'] == combinedItem['id']);
       });
       _calculateTotals();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已刪除品項")));
@@ -189,9 +252,10 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
   }
 
   // Action: Treat Item (Swipe Right) - Toggle Logic
-  Future<void> _toggleTreatItem(String itemId, double currentPrice, double? originalPrice) async {
+  Future<void> _toggleTreatItem(Map<String, dynamic> combinedItem, double currentPrice, double? originalPrice) async {
     final supabase = Supabase.instance.client;
     final bool isTreated = currentPrice == 0;
+    final List<String> itemIds = List<String>.from(combinedItem['_source_ids'] ?? [combinedItem['id']]);
     
     try {
       if (isTreated) {
@@ -205,7 +269,7 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
         await supabase.from('order_items').update({
           'price': restorePrice,
           'original_price': null
-        }).eq('id', itemId);
+        }).inFilter('id', itemIds);
         
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已取消招待 (還原價格)")));
       } else {
@@ -213,15 +277,13 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
         await supabase.from('order_items').update({
           'price': 0,
           'original_price': currentPrice
-        }).eq('id', itemId);
+        }).inFilter('id', itemIds);
         
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已設為招待 (價格 \$0)")));
       }
       
-      // Reload logic slightly optimized: update local
-      // But simpler to just reload or careful local update?
-      // Let's do careful local update.
-      final index = items.indexWhere((item) => item['id'] == itemId);
+      // Local update
+      final index = items.indexWhere((item) => item['id'] == combinedItem['id']);
       if (index != -1) {
         setState(() {
           if (isTreated) {
@@ -381,12 +443,6 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
       appBar: AppBar(
         title: Text(widget.title),
         backgroundColor: Theme.of(context).cardColor,
-        actions: [
-          IconButton(
-            icon: const Icon(CupertinoIcons.printer_fill),
-            onPressed: isLoading ? null : _printAndClose,
-          )
-        ],
       ),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
@@ -444,7 +500,7 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
                                 motion: const ScrollMotion(),
                                 children: [
                                   SlidableAction(
-                                    onPressed: (_) => _toggleTreatItem(itemId, unitPrice, originalPrice), 
+                                    onPressed: (_) => _toggleTreatItem(item, unitPrice, originalPrice), 
                                     backgroundColor: isFree ? Colors.orange : const Color(0xFF21B7CA),
                                     foregroundColor: Colors.white,
                                     icon: isFree ? CupertinoIcons.arrow_uturn_left : CupertinoIcons.gift_fill,
@@ -457,7 +513,7 @@ class _PrintBillScreenState extends ConsumerState<PrintBillScreen> {
                                 motion: const ScrollMotion(),
                                 children: [
                                   SlidableAction(
-                                    onPressed: (_) => _deleteItem(itemId), 
+                                    onPressed: (_) => _deleteItem(item), 
                                     backgroundColor: const Color(0xFFFE4A49),
                                     foregroundColor: Colors.white,
                                     icon: CupertinoIcons.delete,

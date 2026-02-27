@@ -46,9 +46,10 @@ class AuthRepositoryImpl implements AuthRepository {
     // Ideally we should check: remoteDataSource.supabaseClient.auth.currentUser?.id == localUser.id
     
     // Patch: Check if name is missing or generic and fetch if so.
-    if (localUser.name.isEmpty) {
+    // Patch: Check if name is missing or generic and fetch if so.
+    if (localUser.name.trim().isEmpty || localUser.name == '-' || localUser.name == localUser.email) {
         final fetchedName = await remoteDataSource.fetchUserName(localUser.id, localUser.shopId);
-        if (fetchedName != null && fetchedName.isNotEmpty) {
+        if (fetchedName != null && fetchedName.trim().isNotEmpty && fetchedName != '-' && fetchedName != localUser.email) {
              final updatedUser = localUser.copyWith(name: fetchedName);
              await localDataSource.saveUserSession(updatedUser);
              return updatedUser;

@@ -45,6 +45,7 @@ class _OrderScreenState extends ConsumerState<OrderScreen> {
   Widget build(BuildContext context) {
     final menuAsync = ref.watch(menuProvider);
     final cartItems = ref.watch(cartProvider);
+    final int totalCartQty = cartItems.fold<int>(0, (sum, item) => sum + item.quantity);
     
     // Listen for Submission State (Omitted for brevity, kept same)
     ref.listen(orderSubmissionControllerProvider, (prev, next) {
@@ -77,14 +78,14 @@ class _OrderScreenState extends ConsumerState<OrderScreen> {
             alignment: Alignment.center,
             children: [
               IconButton(icon: const Icon(CupertinoIcons.cart, size: 28), onPressed: () => _showCartReviewDialog(context)),
-              if (cartItems.isNotEmpty)
+              if (totalCartQty > 0)
                 Positioned(
                   top: 5, right: 5,
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(color: Theme.of(context).colorScheme.error, shape: BoxShape.circle),
                     constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                    child: Text('${cartItems.length}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                    child: Text('$totalCartQty', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                   ),
                 ),
             ],

@@ -24,12 +24,13 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
   bool isLoading = true;
 
   // Data
-  List<Map<String, dynamic>> allItems = [];
+  List<Map<String, dynamic>> rawItems = []; // Raw items from Database
+  List<Map<String, dynamic>> allItems = []; // Consolidated items for UI
   List<Map<String, dynamic>> activeOrders = []; // List of active orders for these tables
   String? sourceGroupId; // Currently selected source order ID
   
   // Tab 1: Split by Items
-  final List<String> _selectedItemIds = []; // Items selected to move to NEW bill
+  final Map<String, int> _selectedItemsQty = {}; // Mapped Item ID to quantity moved to NEW bill
   double leftTotal = 0;
   double rightTotal = 0;
 
@@ -78,6 +79,21 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
          return tables.any((t) => widget.currentSeats.contains(t));
       }).toList();
 
+      // Filter out empty ghost orders (e.g. created from failed split attempts)
+      if (activeOrders.length > 1) {
+          final activeGroupIds = activeOrders.map((e) => e['id']).toList();
+          final validItemsRes = await supabase
+              .from('order_items')
+              .select('order_group_id')
+              .inFilter('order_group_id', activeGroupIds)
+              .neq('status', 'cancelled');
+              
+          final validGroupIds = Set<String>.from(validItemsRes.map((e) => e['order_group_id'].toString()));
+          
+          // Retain orders that have valid items, but ALWAYS keep the entry group (Host) just in case
+          activeOrders.retainWhere((o) => validGroupIds.contains(o['id']) || o['id'] == widget.groupKey);
+      }
+
       // Ensure sourceGroupId is valid (if not in list, maybe add it? separate fetch? usually it should be in list)
       if (!activeOrders.any((o) => o['id'] == sourceGroupId)) {
          // Should not happen unless status changed.
@@ -86,11 +102,14 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       // 2. Fetch Items for CURRENT sourceGroupId
       final itemsRes = await supabase
           .from('order_items')
-          .select('id, item_name, price, quantity, status')
+          .select('*') // Require Full info for duplication logic if quantities are split
           .eq('order_group_id', sourceGroupId!)
-          .neq('status', 'cancelled'); 
+          .neq('status', 'cancelled')
+          .order('created_at', ascending: true);
       
-      allItems = List<Map<String, dynamic>>.from(itemsRes);
+      rawItems = List<Map<String, dynamic>>.from(itemsRes);
+      allItems = _consolidateItems(rawItems);
+      
       _calculateTotals();
     } catch (e) {
       debugPrint("Load items error: $e");
@@ -99,30 +118,79 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
     }
   }
 
+  // Combine items with the same name, price, note, and modifiers into a single UI row
+  List<Map<String, dynamic>> _consolidateItems(List<Map<String, dynamic>> raw) {
+     List<Map<String, dynamic>> consolidated = [];
+     for (var item in raw) {
+        bool found = false;
+        
+        // Convert modifiers to string for simple comparison
+        final modStr = (item['modifiers'] ?? []).toString();
+        final note = item['note'] ?? '';
+        final price = (item['price'] as num).toDouble();
+        final name = item['item_name'];
+        final status = item['status'];
+        
+        for (var c in consolidated) {
+           final cModStr = (c['modifiers'] ?? []).toString();
+           final cNote = c['note'] ?? '';
+           final cPrice = (c['price'] as num).toDouble();
+           final cName = c['item_name'];
+           final cStatus = c['status'];
+           
+           if (name == cName && price == cPrice && note == cNote && modStr == cModStr && status == cStatus) {
+               // Merge into c
+               c['quantity'] = (c['quantity'] as num).toInt() + (item['quantity'] as num).toInt();
+               c['source_ids'].add(item['id']);
+               found = true;
+               break;
+           }
+        }
+        
+        if (!found) {
+           var newC = Map<String, dynamic>.from(item);
+           newC['source_ids'] = [item['id']];
+           consolidated.add(newC);
+        }
+     }
+     return consolidated;
+  }
+
   void _calculateTotals() {
     leftTotal = 0;
     rightTotal = 0;
     for (var item in allItems) {
+      final itemId = item['id'];
       final price = (item['price'] as num).toDouble();
-      final qty = (item['quantity'] as num).toInt();
-      final total = price * qty;
+      final totalQty = (item['quantity'] as num).toInt();
       
-      if (_selectedItemIds.contains(item['id'])) {
-        rightTotal += total;
-      } else {
-        leftTotal += total;
-      }
+      final movedQty = _selectedItemsQty[itemId] ?? 0;
+      final remainingQty = totalQty - movedQty;
+      
+      rightTotal += (price * movedQty);
+      leftTotal += (price * remainingQty);
     }
     totalAmount = leftTotal + rightTotal;
   }
 
-  // Toggle item selection
-  void _toggleItem(String itemId) {
+  // Toggle item selection (Move 1 to right)
+  void _moveTargetItem(String itemId, {bool toRight = true}) {
+    final item = allItems.firstWhere((e) => e['id'] == itemId);
+    final totalQty = (item['quantity'] as num).toInt();
+    final currentMoved = _selectedItemsQty[itemId] ?? 0;
+
     setState(() {
-      if (_selectedItemIds.contains(itemId)) {
-        _selectedItemIds.remove(itemId);
+      if (toRight) {
+         if (currentMoved < totalQty) {
+            _selectedItemsQty[itemId] = currentMoved + 1;
+         }
       } else {
-        _selectedItemIds.add(itemId);
+         if (currentMoved > 0) {
+            _selectedItemsQty[itemId] = currentMoved - 1;
+            if (_selectedItemsQty[itemId] == 0) {
+                _selectedItemsQty.remove(itemId);
+            }
+         }
       }
       _calculateTotals();
     });
@@ -130,7 +198,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
 
   // Execute Split by Items (DB Transaction)
   Future<void> _executeSplitItems() async {
-    if (_selectedItemIds.isEmpty) return;
+    if (_selectedItemsQty.isEmpty) return;
 
     setState(() => isLoading = true);
     final supabase = Supabase.instance.client;
@@ -144,7 +212,6 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       final hostGroup = await supabase.from('order_groups').select('shop_id, table_names, pax').eq('id', widget.groupKey).single();
       final String shopId = hostGroup['shop_id'];
       final List tableNames = hostGroup['table_names'];
-      // final int hostPax = hostGroup['pax']; 
 
       // Create new group
       final newGroupRes = await supabase.from('order_groups').insert({
@@ -158,11 +225,58 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       
       final String newGroupId = newGroupRes['id'];
 
-      // 2. Move Items
-      await supabase
-          .from('order_items')
-          .update({'order_group_id': newGroupId})
-          .inFilter('id', _selectedItemIds);
+      // 2. Move Items based on Qty mapped
+      List<String> itemsToFullyMove = [];
+      
+      for (var entry in _selectedItemsQty.entries) {
+         final syntheticId = entry.key;
+         int remainingMoveQty = entry.value;
+         if (remainingMoveQty <= 0) continue;
+         
+         final uiItem = allItems.firstWhere((e) => e['id'] == syntheticId);
+         final List<String> sourceIds = List<String>.from(uiItem['source_ids'] ?? []);
+         
+         for (var rawId in sourceIds) {
+             if (remainingMoveQty <= 0) break;
+             
+             final rawItem = rawItems.firstWhere((e) => e['id'] == rawId);
+             final rawQty = (rawItem['quantity'] as num).toInt();
+             
+             if (remainingMoveQty >= rawQty) {
+                 // Move this entire raw item
+                 itemsToFullyMove.add(rawId);
+                 remainingMoveQty -= rawQty;
+             } else {
+                 // Partial Move
+                 await supabase.from('order_items').update({
+                    'quantity': rawQty - remainingMoveQty
+                 }).eq('id', rawId);
+                 
+                 // Insert New Item to New Group
+                 await supabase.from('order_items').insert({
+                    'order_group_id': newGroupId,
+                    'item_id': rawItem['item_id'],
+                    'item_name': rawItem['item_name'],
+                    'price': rawItem['price'],
+                    'quantity': remainingMoveQty,
+                    'modifiers': rawItem['modifiers'], // Retain customization
+                    'note': rawItem['note'],
+                    'status': rawItem['status'],
+                    'target_print_category_ids': rawItem['target_print_category_ids'],
+                    'created_at': rawItem['created_at'], // Keep original creation time for timeline grouping
+                 });
+                 remainingMoveQty = 0;
+             }
+         }
+      }
+
+      // Execute bulk update for fully moved items
+      if (itemsToFullyMove.isNotEmpty) {
+          await supabase
+              .from('order_items')
+              .update({'order_group_id': newGroupId})
+              .inFilter('id', itemsToFullyMove);
+      }
 
       // 3. Success
       if (mounted) {
@@ -170,7 +284,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
         
         // Clear selection and reload to reflect changes (moved items will disappear)
         setState(() {
-          _selectedItemIds.clear();
+          _selectedItemsQty.clear();
         });
         await _loadData();
       }
@@ -238,7 +352,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 已回復至主單")));
          setState(() {
            sourceGroupId = mainOrderId;
-           _selectedItemIds.clear();
+           _selectedItemsQty.clear();
          });
          await _loadData(); 
       }
@@ -355,7 +469,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 已取消均分並回復")));
          setState(() {
            sourceGroupId = sourceId; // Go to Source
-           _selectedItemIds.clear();
+           _selectedItemsQty.clear();
          });
          await _loadData(); 
       }
@@ -449,7 +563,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                             if (val != null && val != sourceGroupId) {
                               setState(() {
                                 sourceGroupId = val;
-                                _selectedItemIds.clear(); // Reset selection on change
+                                _selectedItemsQty.clear(); // Reset selection on change
                               });
                               _loadData(); // Reload items for new source
                             }
@@ -473,8 +587,12 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                   itemCount: allItems.length,
                   itemBuilder: (context, index) {
                     final item = allItems[index];
-                    if (_selectedItemIds.contains(item['id'])) return const SizedBox.shrink(); // Hide if moved
-                    return _buildItemRow(item, isLeft: true);
+                    final itemId = item['id'];
+                    final totalQty = (item['quantity'] as num).toInt();
+                    final movedQty = _selectedItemsQty[itemId] ?? 0;
+                    
+                    if (movedQty == totalQty) return const SizedBox.shrink(); // Fully moved
+                    return _buildItemRow(item, isLeft: true, displayQty: totalQty - movedQty);
                   },
                 ),
               ),
@@ -485,8 +603,11 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                   itemCount: allItems.length,
                   itemBuilder: (context, index) {
                     final item = allItems[index];
-                    if (!_selectedItemIds.contains(item['id'])) return const SizedBox.shrink(); // Hide if not moved
-                    return _buildItemRow(item, isLeft: false);
+                    final itemId = item['id'];
+                    final movedQty = _selectedItemsQty[itemId] ?? 0;
+                    
+                    if (movedQty == 0) return const SizedBox.shrink(); // Hide if not moved at all
+                    return _buildItemRow(item, isLeft: false, displayQty: movedQty);
                   },
                 ),
               ),
@@ -507,7 +628,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          setState(() => _selectedItemIds.clear());
+                          setState(() => _selectedItemsQty.clear());
                           _calculateTotals();
                         }, 
                         child: const Text("重置")
@@ -524,13 +645,13 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                           disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
                           elevation: 0,
                         ),
-                          onPressed: (_selectedItemIds.isEmpty || (allItems.length - _selectedItemIds.length < 1)) ? null : _executeSplitItems,
-                          child: Text("確認拆出 (${_selectedItemIds.length})")
+                          onPressed: _isMoveValid() ? _executeSplitItems : null,
+                          child: Text("確認拆出 (${_selectedItemsQty.length})")
                       )
                     ),
                   ],
                 ),
-                if (activeOrders.length > 0 && (allItems.length - _selectedItemIds.length < 1) && _selectedItemIds.isNotEmpty)
+                if (!_isMoveValid() && _selectedItemsQty.isNotEmpty)
                    Padding(
                      padding: const EdgeInsets.only(top: 8),
                      child: Text("⚠️ 原訂單不能為空，請至少保留一個品項", style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
@@ -543,12 +664,27 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildItemRow(Map<String, dynamic> item, {required bool isLeft}) {
+  bool _isMoveValid() {
+     if (_selectedItemsQty.isEmpty) return false;
+     
+     // Cannot move ALL items across the board (Original must have at least 1 remaining quantity overall)
+     int totalRemainingQty = 0;
+     for (var item in allItems) {
+         final itemId = item['id'];
+         final totalQty = (item['quantity'] as num).toInt();
+         final movedQty = _selectedItemsQty[itemId] ?? 0;
+         totalRemainingQty += (totalQty - movedQty);
+     }
+     if (activeOrders.isNotEmpty && totalRemainingQty == 0) return false;
+     
+     return true;
+  }
+
+  Widget _buildItemRow(Map<String, dynamic> item, {required bool isLeft, required int displayQty}) {
     final price = (item['price'] as num).toDouble();
-    final qty = (item['quantity'] as num).toInt();
     
     return InkWell(
-      onTap: () => _toggleItem(item['id']),
+      onTap: () => _moveTargetItem(item['id'], toRight: isLeft),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
@@ -563,7 +699,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(item['item_name'], style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w500)),
-                  Text("\$${(price * qty).toStringAsFixed(0)} (x$qty)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13)),
+                  Text("\$${(price * displayQty).toStringAsFixed(0)} (x$displayQty)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13)),
                 ],
               ),
             ),

@@ -4,6 +4,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'settlement_provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'dart:math'; 
@@ -178,14 +180,14 @@ enum CashScreenMode {
   settlement,
 }
 
-class CashSettlementScreen extends StatefulWidget {
+class CashSettlementScreen extends ConsumerStatefulWidget {
   const CashSettlementScreen({super.key});
 
   @override
-  State<CashSettlementScreen> createState() => _CashSettlementScreenState();
+  ConsumerState<CashSettlementScreen> createState() => _CashSettlementScreenState();
 }
 
-class _CashSettlementScreenState extends State<CashSettlementScreen> {
+class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
   String? _shopId;
   String? _userId;
   String? _currentUserName;
@@ -234,11 +236,47 @@ class _CashSettlementScreenState extends State<CashSettlementScreen> {
     super.initState();
     _cashCounts.forEach((key, c) {
       c.text = '';
-      c.addListener(_calculateAll);
+      c.addListener(() {
+        final count = int.tryParse(c.text) ?? 0;
+        ref.read(settlementProvider.notifier).updateCashCount(key, count);
+        _calculateAll();
+      });
       _cashCountFocusNodes[key] = FocusNode();
     });
-    _revenueTotalController.addListener(_calculateAll);
+    
+    _revenueTotalController.addListener(() {
+      final amount = double.tryParse(_revenueTotalController.text) ?? 0.0;
+      ref.read(settlementProvider.notifier).updateRevenue(amount);
+      _calculateAll();
+    });
+
+    // 延遲初始化從 Provider 讀取的數據，確保 ref 已可用
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadSavedProgress());
     _fetchInitialData();
+  }
+
+  void _loadSavedProgress() {
+    final savedState = ref.read(settlementProvider);
+    
+    if (mounted) {
+      setState(() {
+        if (savedState.totalRevenue != null) {
+          _revenueTotalController.text = savedState.totalRevenue!.toStringAsFixed(0);
+        }
+        
+        savedState.cashCounts.forEach((key, value) {
+          if (_cashCounts.containsKey(key)) {
+            _cashCounts[key]!.text = value > 0 ? value.toString() : '';
+          }
+        });
+
+        savedState.paymentAmounts.forEach((key, value) {
+          if (_paymentControllers.containsKey(key)) {
+             _paymentControllers[key]!.text = value > 0 ? value.toStringAsFixed(0) : '';
+          }
+        });
+      });
+    }
   }
 
   @override
@@ -362,10 +400,23 @@ class _CashSettlementScreenState extends State<CashSettlementScreen> {
       _paymentFocusNodes.clear();
 
       for (var method in _enabledPaymentMethods) {
-        _paymentControllers[method.name] = TextEditingController();
-        _paymentControllers[method.name]?.addListener(_calculateAll);
+        final ctrl = TextEditingController();
+        _paymentControllers[method.name] = ctrl;
+        ctrl.addListener(() {
+          final amount = double.tryParse(ctrl.text) ?? 0.0;
+          ref.read(settlementProvider.notifier).updatePaymentAmount(method.name, amount);
+          _calculateAll();
+        });
         _paymentFocusNodes[method.name] = FocusNode();
       }
+      
+      // 載入暫存數據 (針對支付方式)
+      final savedState = ref.read(settlementProvider);
+      savedState.paymentAmounts.forEach((key, value) {
+        if (_paymentControllers.containsKey(key)) {
+          _paymentControllers[key]!.text = value > 0 ? value.toStringAsFixed(0) : '';
+        }
+      });
     } catch (e) {}
   }
   
@@ -962,6 +1013,9 @@ class _CashSettlementScreenState extends State<CashSettlementScreen> {
       builder: (_) => _NoticeDialog(title: title, content: content),
     );
     if (popPage && mounted) {
+      if (title.contains("成功") || title.contains("Success")) {
+        ref.read(settlementProvider.notifier).reset();
+      }
       context.go('/home'); 
     }
   }

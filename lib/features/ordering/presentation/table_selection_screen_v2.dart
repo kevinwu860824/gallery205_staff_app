@@ -13,6 +13,7 @@ import '../data/repositories/ordering_repository_impl.dart';
 import '../data/datasources/ordering_remote_data_source.dart';
 import '../domain/models/table_model.dart';
 import '../domain/entities/order_item.dart';
+import '../../../core/services/site_verification_service.dart'; // [修正]
 
 // -------------------------------------------------------------------
 // 1. 樣式與色盤定義
@@ -42,6 +43,10 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
   int unsyncedCount = 0;
   int failedPrintCount = 0;
 
+  // [新增] 場域驗證狀態
+  SiteVerificationResult? _siteResult;
+  bool _isVerifyingSite = false;
+
   RealtimeChannel? _subscription;
   StreamSubscription? _printTaskSubscription;
   Timer? _refreshTimer;
@@ -49,7 +54,9 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
   @override
   void initState() {
     super.initState();
-    _checkShiftStatus().then((_) => _initData());
+    _verifySite().then((_) {
+      _checkShiftStatus().then((_) => _initData());
+    });
     _subscribeToRealtime();
     
     // Auto Refresh every 10 seconds (User request)
@@ -255,9 +262,37 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
   // 互動邏輯
   // ----------------------------------------------------------------
 
-  void _onTableTap(TableModel table) {
+  void _onTableTap(TableModel table) async {
     if (table.status == TableStatus.occupied) {
-      _showOccupiedActionMenu(table);
+      final List<String> sortedOrderIds = List.from(table.activeOrderGroupIds);
+      if (sortedOrderIds.isEmpty && table.currentOrderGroupId != null) {
+          sortedOrderIds.add(table.currentOrderGroupId!);
+      }
+
+      if (sortedOrderIds.length > 1) {
+        // Prompt user to select which order to operate on
+        final String? selectedId = await showDialog<String>(
+          context: context,
+          builder: (context) => SimpleDialog(
+            title: const Text("請選擇要操作的訂單"),
+            children: List.generate(sortedOrderIds.length, (index) {
+              final id = sortedOrderIds[index];
+              return SimpleDialogOption(
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                onPressed: () => Navigator.pop(context, id),
+                child: Text("訂單 ${index + 1}", style: const TextStyle(fontSize: 18)),
+              );
+            }),
+          ),
+        );
+        
+        if (selectedId != null) {
+          _showOccupiedActionMenu(table, overrideOrderGroupId: selectedId);
+        }
+      } else {
+        // Single order, proceed directly
+        _showOccupiedActionMenu(table);
+      }
     } else {
       setState(() {
         if (_selectedEmptyTables.contains(table.tableName)) {
@@ -758,31 +793,9 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
                         context, "列印結帳單", CupertinoIcons.printer, 
                         onTap: () async {
                           Navigator.pop(sheetContext);
-                          
-                          String targetId = currentSelectedId;
-
-                          if (sortedOrderIds.length > 1) {
-                            final String? selected = await showDialog<String>(
-                              context: parentContext,
-                              builder: (context) => SimpleDialog(
-                                title: const Text("請選擇要列印的訂單"),
-                                children: List.generate(sortedOrderIds.length, (index) {
-                                  final id = sortedOrderIds[index];
-                                  return SimpleDialogOption(
-                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                                    onPressed: () => Navigator.pop(context, id),
-                                    child: Text("訂單 ${index + 1}", style: const TextStyle(fontSize: 16)),
-                                  );
-                                }),
-                              ),
-                            );
-                            if (selected == null) return; // Cancelled
-                            targetId = selected;
-                          }
-
                           if (mounted) {
                             parentContext.push('/printBill', extra: {
-                              'groupKey': targetId,
+                              'groupKey': currentSelectedId,
                               'title': '結帳單 (預結)',
                             });
                           }
@@ -793,30 +806,9 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
                         color: const Color(0xFF32D74B),
                         onTap: () async {
                           Navigator.pop(sheetContext);
-                          
-                          String targetId = currentSelectedId;
-
-                          if (sortedOrderIds.length > 1) {
-                            final String? selected = await showDialog<String>(
-                              context: parentContext,
-                              builder: (context) => SimpleDialog(
-                                title: const Text("請選擇要結帳的訂單"),
-                                children: List.generate(sortedOrderIds.length, (index) {
-                                  final id = sortedOrderIds[index];
-                                  return SimpleDialogOption(
-                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                                    onPressed: () => Navigator.pop(context, id),
-                                    child: Text("訂單 ${index + 1}", style: const TextStyle(fontSize: 16)),
-                                  );
-                                }),
-                              ),
-                            );
-                            if (selected == null) return; // Cancelled
-                            targetId = selected;
-                          }
 
                           await parentContext.push('/payment', extra: {
-                            'groupKey': targetId, // Use selected targetId
+                            'groupKey': currentSelectedId,
                             'totalAmount': 0.0, // Calculated internally
                           });
                           
@@ -1359,6 +1351,16 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
                 ),
           ),
 
+          // [新增] 場域驗證攔截遮罩
+          if (_siteResult != null && !_siteResult!.isVerified)
+            _buildSiteVerificationOverlay(),
+          
+          if (_isVerifyingSite)
+            Container(
+              color: Colors.black.withOpacity(0.5),
+              child: const Center(child: CupertinoActivityIndicator(color: Colors.white)),
+            ),
+
           // 2. Header
           Positioned(
             top: 0,
@@ -1602,6 +1604,72 @@ class _TableSelectionScreenV2State extends State<TableSelectionScreenV2> {
       ),
     );
   }
+
+  // [新增] 執行場域驗證
+  Future<void> _verifySite() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shopId = prefs.getString('savedShopId');
+    if (shopId == null) return;
+
+    setState(() => _isVerifyingSite = true);
+    
+    final result = await SiteVerificationService().verifySite(shopId);
+    
+    if (mounted) {
+      setState(() {
+        _siteResult = result;
+        _isVerifyingSite = false;
+      });
+    }
+  }
+
+  Widget _buildSiteVerificationOverlay() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      color: Colors.black.withOpacity(0.85),
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(CupertinoIcons.location_slash_fill, color: Colors.white, size: 80),
+            const SizedBox(height: 24),
+            const Text(
+              "點餐功能受限",
+              style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _siteResult?.errorMessage ?? "請確認您是否於店內工作範圍，並已連結正確 Wi-Fi。",
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: 200,
+              child: ElevatedButton(
+                onPressed: _verifySite,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: colorScheme.onPrimary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text("重新驗證場域", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () => context.go('/home'),
+              child: const Text("回到主畫面", style: TextStyle(color: Colors.white54, fontSize: 16)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // -------------------------------------------------------------------
@@ -1730,7 +1798,6 @@ class _FailedPrintsDialogState extends State<_FailedPrintsDialog> {
   //     if(mounted) setState(() => isLoading = false);
   //   }
   // }
-
   Future<void> _reprint(List<String> itemIds) async {
       setState(() => isLoading = true);
       int successCount = 0;
@@ -1750,6 +1817,41 @@ class _FailedPrintsDialogState extends State<_FailedPrintsDialog> {
       if(mounted) {
          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("已發送 $successCount 筆補印指令"))); 
          _loadData(); 
+      }
+  }
+
+  Future<void> _clearAll(List<String> itemIds) async {
+      final bool? confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: Text("確認全部清除？", style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+          content: Text("確定要清除所有卡住的列印項目嗎？\n(這並不會刪除訂單，但項目將不再提示補印)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8))),
+          actions: [
+             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("取消")),
+             TextButton(
+                onPressed: () => Navigator.pop(context, true), 
+                child: const Text("確認清除", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+             ),
+          ],
+        )
+      );
+      
+      if (confirm != true) return;
+
+      setState(() => isLoading = true);
+      
+      try {
+         await widget.repository.updatePrintStatus(itemIds, 'success');
+         if(mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已清除所有待補印項目"))); 
+            _loadData(); 
+         }
+      } catch (e) {
+         if(mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("清除失敗: $e"))); 
+            setState(() => isLoading = false);
+         }
       }
   }
 
@@ -1792,29 +1894,43 @@ class _FailedPrintsDialogState extends State<_FailedPrintsDialog> {
                  )
                ),
             const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-               TextButton(onPressed: () => Navigator.pop(context), child: const Text("關閉")),
-               const SizedBox(width: 8),
-               if(failedItems.isNotEmpty) 
-                  IconButton(
-                    onPressed: _loadData, 
-                    icon: const Icon(CupertinoIcons.refresh),
-                    tooltip: "重新整理",
-                  ),
-               if(failedItems.isNotEmpty) ...[
-                 const SizedBox(width: 8),
-                  ElevatedButton(
-                     onPressed: () => _reprint(List<String>.from(failedItems.map((e) => (e['item'] as OrderItem).id))),
-                     style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white, 
-                        foregroundColor: Theme.of(context).scaffoldBackgroundColor, // User requested Home Screen Background Color
-                        elevation: 0,
-                        side: BorderSide(color: Theme.of(context).dividerColor),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if(failedItems.isNotEmpty) 
+                     IconButton(
+                       onPressed: _loadData, 
+                       icon: const Icon(CupertinoIcons.refresh),
+                       tooltip: "重新整理",
                      ),
-                     child: const Text("全部補印")
-                  )
-               ]
-            ])
+                  if(failedItems.isNotEmpty) ...[
+                     const SizedBox(width: 8),
+                     ElevatedButton(
+                        onPressed: () => _clearAll(List<String>.from(failedItems.map((e) => (e['item'] as OrderItem).id))),
+                        style: ElevatedButton.styleFrom(
+                           backgroundColor: Theme.of(context).colorScheme.error, 
+                           foregroundColor: Colors.white,
+                           elevation: 0,
+                        ),
+                        child: const Text("全部清除")
+                     ),
+                     const SizedBox(width: 8),
+                     ElevatedButton(
+                        onPressed: () => _reprint(List<String>.from(failedItems.map((e) => (e['item'] as OrderItem).id))),
+                        style: ElevatedButton.styleFrom(
+                           backgroundColor: Colors.white, 
+                           foregroundColor: Theme.of(context).scaffoldBackgroundColor, 
+                           elevation: 0,
+                           side: BorderSide(color: Theme.of(context).dividerColor),
+                        ),
+                        child: const Text("全部補印")
+                     )
+                  ]
+                ],
+              ),
+            )
          ])
        )
     );

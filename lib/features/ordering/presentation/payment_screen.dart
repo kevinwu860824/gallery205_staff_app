@@ -14,6 +14,8 @@ import 'package:gallery205_staff_app/features/ordering/domain/entities/order_con
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/services.dart'; // NEW
+import 'package:dropdown_button2/dropdown_button2.dart'; // NEW
+
 
 class PaymentScreen extends ConsumerStatefulWidget {
   final String groupKey;
@@ -55,6 +57,15 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   String? _shopPhone;
   String? _sellerUbn;
   String? _shopCode;
+
+
+  // Manual Adjustments
+  bool isServiceFeeEnabled = true;
+  int serviceFeeRate = 10;
+  double manualDiscount = 0.0;
+  final TextEditingController discountController = TextEditingController();
+  final List<int> serviceFeeOptions = [0, 5, 10, 15];
+
 
   // Exclusivity Check
   void _onUbnChanged() {
@@ -174,6 +185,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     refController.dispose();
     carrierNumController.dispose();
     ubnController.dispose();
+    discountController.dispose();
     super.dispose();
   }
 
@@ -230,49 +242,42 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   Future<void> _loadOrderDetails() async {
      try {
        final supabase = Supabase.instance.client;
-       
-       // 1. Get Group Settings
-       final groupRes = await supabase.from('order_groups').select().eq('id', widget.groupKey).single();
-       int serviceFeeRate = groupRes['service_fee_rate'] ?? 10;
-       double discount = (groupRes['discount_amount'] as num?)?.toDouble() ?? 0;
-       
-       // Tax Logic (Using Calculator)
-       final snapshot = groupRes['tax_snapshot'];
-       final taxProfile = TaxProfile(
-           id: 'temp', 
-           shopId: '', 
-           rate: (snapshot != null) ? (snapshot['rate'] as num?)?.toDouble() ?? 0.0 : 0.0,
-           isTaxIncluded: (snapshot != null) ? (snapshot['is_tax_included'] ?? true) : true,
-           updatedAt: DateTime.now()
-       );
+              // 1. Get Group Settings
+        final groupRes = await supabase.from('order_groups').select().eq('id', widget.groupKey).single();
+        
+        final int initialRate = groupRes['service_fee_rate'] ?? 10;
+        final double initialDiscount = (groupRes['discount_amount'] as num?)?.toDouble() ?? 0;
+        
+        if (!_isLoaded) {
+           isServiceFeeEnabled = initialRate > 0;
+           serviceFeeRate = initialRate > 0 ? initialRate : 10;
+           manualDiscount = initialDiscount;
+           discountController.text = manualDiscount != 0 ? manualDiscount.toStringAsFixed(0) : '';
+        }
 
-       // 2. Get Active Items
-       final itemsRes = await supabase.from('order_items')
-           .select()
-           .eq('order_group_id', widget.groupKey)
-           .neq('status', 'cancelled');
-           
-       final price = OrderCalculator.calculate(
-          items: itemsRes,
-          serviceFeeRate: (groupRes['service_fee_rate'] as num?)?.toDouble() ?? 10.0,
-          discountAmount: (groupRes['discount_amount'] as num?)?.toDouble() ?? 0.0,
-          taxProfile: taxProfile,
-       );
-       
-       if (mounted) setState(() {
-         _totalAmount = price.finalTotal;
-         _taxAmount = price.taxAmount;
-         
-         // Store Info for Printing
-         _itemDetails = List<Map<String, dynamic>>.from(itemsRes);
-         _tableNames = List<String>.from(groupRes['table_names'] ?? []);
-         _pax = groupRes['pax'] ?? 0;
-         _createdAt = DateTime.parse(groupRes['created_at']);
-         _taxProfile = taxProfile;
-         _serviceFeeAmount = price.serviceFee;
-         _discountAmount = (groupRes['discount_amount'] as num?)?.toDouble() ?? 0;
-         _subtotal = price.subtotal;
-       });
+        // Tax Logic (Using Calculator)
+        final snapshot = groupRes['tax_snapshot'];
+        final taxProfile = TaxProfile(
+            id: 'temp', 
+            shopId: '', 
+            rate: (snapshot != null) ? (snapshot['rate'] as num?)?.toDouble() ?? 0.0 : 0.0,
+            isTaxIncluded: (snapshot != null) ? (snapshot['is_tax_included'] ?? true) : true,
+            updatedAt: DateTime.now()
+        );
+
+        // 2. Get Active Items
+        final itemsRes = await supabase.from('order_items')
+            .select()
+            .eq('order_group_id', widget.groupKey)
+            .neq('status', 'cancelled');
+        
+        _itemDetails = List<Map<String, dynamic>>.from(itemsRes);
+        _taxProfile = taxProfile;
+        _tableNames = List<String>.from(groupRes['table_names'] ?? []);
+        _pax = groupRes['pax'] ?? 0;
+        _createdAt = DateTime.parse(groupRes['created_at']);
+        
+        _calculateTotals();
 
        // Fetch Order Rank (Async)
        try {
@@ -285,10 +290,124 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           }
        } catch (e) { print("Rank error: $e"); }
 
-     } catch (e) {
-       debugPrint("Load order error: $e");
-       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("載入訂單失敗: $e")));
-     }
+      } catch (e) {
+        debugPrint("Load order error: $e");
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("載入訂單失敗: $e")));
+      }
+  }
+
+  void _calculateTotals() {
+    if (_taxProfile == null) return;
+    
+    final price = OrderCalculator.calculate(
+      items: _itemDetails,
+      serviceFeeRate: isServiceFeeEnabled ? serviceFeeRate.toDouble() : 0.0,
+      discountAmount: manualDiscount,
+      taxProfile: _taxProfile!,
+    );
+
+    if (mounted) {
+      setState(() {
+        _totalAmount = price.finalTotal;
+        _taxAmount = price.taxAmount;
+        _serviceFeeAmount = price.serviceFee;
+        _discountAmount = manualDiscount;
+        _subtotal = price.subtotal;
+        
+        // Update remaining amount in form
+        final rem = _totalAmount - _paidTotal;
+        amountController.text = rem > 0 ? rem.toStringAsFixed(0) : '';
+      });
+    }
+  }
+
+  // Printing Helper for "結帳確認單"
+  Future<void> _reprintBill() async {
+    setState(() => isLoading = true);
+    final supabase = Supabase.instance.client;
+    final printerService = PrinterService();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final shopId = prefs.getString('savedShopId');
+      if (shopId == null) return;
+
+      final printerRes = await supabase.from('printer_settings').select().eq('shop_id', shopId);
+      final printerSettings = List<Map<String, dynamic>>.from(printerRes);
+
+      final orderGroup = OrderGroup(
+        id: widget.groupKey,
+        status: OrderStatus.dining,
+        items: [],
+        createdAt: _createdAt ?? DateTime.now(),
+        shopId: shopId,
+      );
+
+      final orderRank = await ref.read(orderingRepositoryProvider).getOrderRank(widget.groupKey);
+
+      final orderContext = OrderContext(
+        order: orderGroup,
+        tableNames: _tableNames,
+        peopleCount: _pax,
+        staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty)
+            ? ref.read(authStateProvider).value!.name
+            : (ref.read(authStateProvider).value?.email ?? ''),
+      );
+
+      final bool isIncluded = _taxProfile?.isTaxIncluded ?? true;
+      final double taxToPrint = isIncluded ? 0 : _taxAmount;
+      final String? taxLabel = isIncluded ? null : "稅額 (${(_taxProfile?.rate ?? 0).toStringAsFixed(0)}%)";
+
+      final int printCount = await printerService.printBill(
+        context: orderContext,
+        items: _itemDetails,
+        printerSettings: printerSettings,
+        subtotal: _subtotal,
+        serviceFee: _serviceFeeAmount,
+        discount: manualDiscount,
+        finalTotal: _totalAmount,
+        taxAmount: taxToPrint,
+        taxLabel: taxLabel,
+        orderSequenceNumber: orderRank,
+      );
+
+      if (mounted) {
+        if (printCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("🖨️ 已補印 $printCount 台印表機")));
+        } else if (printCount == -1) {
+           _showNoPrinterDialog();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("列印失敗或未設定收據印表機")));
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("列印錯誤: $e")));
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+  
+  void _showNoPrinterDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("未設定結帳印表機"),
+        content: const Text("系統找不到已設為「收據/結帳」的印表機。\n請至 設定 > 印表機設定，編輯任一印表機並開啟「設為收據印表機」開關。"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text("好")
+          ),
+          TextButton(
+             onPressed: () {
+               Navigator.pop(context);
+               context.push('/printerSettings'); 
+             },
+             child: const Text("前往設定"),
+          )
+        ],
+      )
+    );
   }
 
   double get _paidTotal {
@@ -411,11 +530,14 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           'checkout_time': DateTime.now().toUtc().toIso8601String(),
           'payment_method': payments.map((p) => p['method']).toSet().join(','), 
           'final_amount': _totalAmount,
+          'service_fee_rate': isServiceFeeEnabled ? serviceFeeRate : 0,
+          'discount_amount': manualDiscount,
           'open_id': openId, // Link to shift
           'buyer_ubn': ubn.isNotEmpty ? ubn : null,
           'carrier_type': carrierNum.isNotEmpty ? '0' : null, // Force '0' for mobile barcode
           'carrier_num': carrierNum.isNotEmpty ? carrierNum : null,
         }).eq('id', widget.groupKey);
+
       } catch (e) {
         throw "更新訂單狀態失敗: $e";
       }
@@ -642,7 +764,16 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(CupertinoIcons.printer_fill),
+            onPressed: isLoading ? null : _reprintBill,
+            tooltip: "補印結帳確認單",
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
+
       extendBodyBehindAppBar: true,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -682,6 +813,93 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                           ),
                           
                           const SizedBox(height: 16),
+
+                          // 1.5 Adjustments (Service Fee & Discount)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Checkbox(
+                                      value: isServiceFeeEnabled, 
+                                      activeColor: Theme.of(context).colorScheme.primary,
+                                      onChanged: (v) => setState(() {
+                                        isServiceFeeEnabled = v ?? true;
+                                        _calculateTotals();
+                                      }),
+                                    ),
+                                    const Text("服務費", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    const Spacer(),
+                                    if (isServiceFeeEnabled)
+                                      DropdownButtonHideUnderline(
+                                        child: DropdownButton2<int>(
+                                          value: serviceFeeRate,
+                                          items: serviceFeeOptions.map((rate) => DropdownMenuItem(
+                                            value: rate,
+                                            child: Text("$rate%", style: const TextStyle(fontSize: 14)),
+                                          )).toList(),
+                                          onChanged: (val) {
+                                            if (val != null) {
+                                              setState(() {
+                                                serviceFeeRate = val;
+                                                _calculateTotals();
+                                              });
+                                            }
+                                          },
+                                          buttonStyleData: ButtonStyleData(
+                                            height: 36,
+                                            width: 80,
+                                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: Theme.of(context).dividerColor),
+                                              color: Theme.of(context).cardColor,
+                                            ),
+                                          ),
+                                          menuItemStyleData: const MenuItemStyleData(height: 36),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const SizedBox(width: 12),
+                                    const Icon(CupertinoIcons.scissors, size: 20),
+                                    const SizedBox(width: 12),
+                                    const Text("折讓金額", style: TextStyle(fontSize: 16)),
+                                    const Spacer(),
+                                    SizedBox(
+                                      width: 80,
+                                      height: 36,
+                                      child: TextField(
+                                        controller: discountController,
+                                        keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: false),
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(fontSize: 20),
+                                        decoration: InputDecoration(
+                                          hintText: "0",
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                          isDense: true,
+                                        ),
+                                        onChanged: (v) {
+                                          setState(() {
+                                            manualDiscount = double.tryParse(v) ?? 0.0;
+                                            _calculateTotals();
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 16),
+
                           
                           // 2. Added Payments List
                           if (payments.isNotEmpty)

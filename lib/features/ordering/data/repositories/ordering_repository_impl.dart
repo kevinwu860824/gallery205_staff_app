@@ -215,19 +215,34 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
       final allPrintCategories = await remoteDataSource.getPrintCategories(shopId);
       final orderSeq = await remoteDataSource.getOrderSequenceNumber(shopId);
 
-      // Construct entities for printing
-      final orderGroup = OrderGroup(
-        id: orderGroupId,
-        status: OrderStatus.dining,
-        items: [], // Not needed for deletion call
-      );
-      
-      final orderContext = OrderContext(
-         order: orderGroup,
-         tableNames: [tableName],
-         peopleCount: orderGroupPax,
-         staffName: staffName ?? '',
-      );
+      OrderContext? realContext;
+      try {
+         realContext = await getOrderContext(orderGroupId);
+      } catch (e) {
+         print("Failed to fetch real order context for void ticket: $e");
+      }
+
+      late OrderContext orderContext;
+      if (realContext != null) {
+        orderContext = realContext.copyWith(
+           order: realContext.order.copyWith(items: []),
+           staffName: (staffName != null && staffName.isNotEmpty) ? staffName : realContext.staffName,
+        );
+      } else {
+        // Construct entities for printing fallback
+        final orderGroup = OrderGroup(
+          id: orderGroupId,
+          status: OrderStatus.dining,
+          items: [], // Not needed for deletion call
+        );
+        
+        orderContext = OrderContext(
+           order: orderGroup,
+           tableNames: [tableName],
+           peopleCount: orderGroupPax,
+           staffName: staffName ?? '',
+        );
+      }
 
       // OrderItem needs to be 'cancelled' status but we already passed it.
       // Ensure the passed 'item' has the correct structure for printing if needed, 
@@ -266,18 +281,35 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
       status: 'submitted', // Ensure status is submitted so it prints
     );
 
-    final orderGroup = OrderGroup(
-      id: orderGroupId,
-      status: OrderStatus.dining,
-      items: [reprintItem],
-    );
-    
-    final orderContext = OrderContext(
-      order: orderGroup,
-      tableNames: [tableName],
-      peopleCount: 0,
-      staffName: staffName ?? '',
-    );
+    // Fetch actual full context to preserve pax, pax_adult, pax_child, and real staff_name
+    OrderContext? realContext;
+    try {
+       realContext = await getOrderContext(orderGroupId);
+    } catch (e) {
+       print("Failed to fetch real order context for reprint: $e");
+    }
+
+    late OrderContext orderContext;
+    if (realContext != null) {
+      orderContext = realContext.copyWith(
+         order: realContext.order.copyWith(items: [reprintItem]),
+         staffName: realContext.staffName.isNotEmpty ? realContext.staffName : (staffName ?? ''),
+      );
+    } else {
+      // Fallback
+      final orderGroup = OrderGroup(
+        id: orderGroupId,
+        status: OrderStatus.dining,
+        items: [reprintItem],
+      );
+      
+      orderContext = OrderContext(
+        order: orderGroup,
+        tableNames: [tableName],
+        peopleCount: 0,
+        staffName: staffName ?? '',
+      );
+    }
 
     // Use batch index 0
     await updatePrintStatus([item.id], 'pending');
@@ -406,18 +438,40 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
        }
     }
 
-    final orderGroup = OrderGroup(
-      id: orderGroupId,
-      status: OrderStatus.dining,
-      items: itemsToPrint,
-    );
-    
-    final orderContext = OrderContext(
-      order: orderGroup,
-      tableNames: tableNames,
-      peopleCount: pax,
-      staffName: staffName ?? '',
-    );
+    OrderContext? realContext;
+    try {
+       realContext = await getOrderContext(orderGroupId);
+    } catch (e) {
+       print("Failed to fetch real order context for reprintBatch: $e");
+    }
+
+    late OrderContext printContext;
+    late OrderContext deleteContext;
+
+    if (realContext != null) {
+      printContext = realContext.copyWith(
+         order: realContext.order.copyWith(items: itemsToPrint),
+         staffName: realContext.staffName.isNotEmpty ? realContext.staffName : (staffName ?? ''),
+      );
+      deleteContext = realContext.copyWith(
+         order: realContext.order.copyWith(items: itemsToDelete), // Not strictly needed for deletion, but keeps format
+         staffName: realContext.staffName.isNotEmpty ? realContext.staffName : (staffName ?? ''),
+      );
+    } else {
+      // Fallback
+      printContext = OrderContext(
+        order: OrderGroup(id: orderGroupId, status: OrderStatus.dining, items: itemsToPrint),
+        tableNames: tableNames,
+        peopleCount: pax,
+        staffName: staffName ?? '',
+      );
+      deleteContext = OrderContext(
+        order: OrderGroup(id: orderGroupId, status: OrderStatus.dining, items: itemsToDelete),
+        tableNames: tableNames,
+        peopleCount: pax,
+        staffName: staffName ?? '',
+      );
+    }
 
     if (itemsToPrint.isNotEmpty) {
       // 1. Mark as Pending
@@ -425,7 +479,7 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
 
       // 2. Execute
       final failedIds = await printerService.processOrderPrinting(
-        orderContext,
+        printContext,
         printerSettings,
         allPrintCategories,
         batchIndex
@@ -442,7 +496,7 @@ class OrderingRepositoryImpl implements OrderingRepository, SessionRepository {
        for (var delItem in itemsToDelete) {
           try {
              final failedDel = await printerService.processDeletionPrinting(
-                 orderContext, // Group info
+                 deleteContext, // Group info
                  delItem,
                  printerSettings,
                  allPrintCategories,

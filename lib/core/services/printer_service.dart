@@ -439,7 +439,7 @@ class PrinterService {
     String safeName = context.staffName.trim().replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
     debugPrint("PRINTER_DEBUG: Raw='${context.staffName}' (Len: ${context.staffName.length}), Safe='$safeName' (Len: ${safeName.length}), CodeUnits: ${context.staffName.codeUnits}");
 
-    final String staffDisplay = safeName.isNotEmpty ? safeName : "-";
+    final String staffDisplay = safeName.isNotEmpty ? safeName : "系統操作";
     
     // Center Align Staff Name (Since Machine ID is removed)
     _drawTextCenter(canvas, "人員：$staffDisplay", width, y, styleLabel);
@@ -1017,7 +1017,7 @@ class PrinterService {
 
     // Footer - Unified Style (Centered Staff, No Machine ID)
     String safeName = context.staffName.trim().replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
-    final String staffDisplay = safeName.isNotEmpty ? safeName : "-";
+    final String staffDisplay = safeName.isNotEmpty ? safeName : "系統操作";
     _drawTextCenter(canvas, "結帳人員：$staffDisplay", width, y, styleLabel);
     
     y += 40;
