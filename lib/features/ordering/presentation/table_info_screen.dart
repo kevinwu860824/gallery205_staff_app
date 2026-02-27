@@ -75,11 +75,44 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
           .eq('order_group_id', widget.orderGroupId)
           .order('created_at', ascending: true);
 
-      // 3. 計算總金額 (只計算非 cancelled 的項目)
+      // 3. 計算總金額 (只計算非 cancelled 的項目) + Consolidate Items
       double tempTotal = 0.0;
-      final List<Map<String, dynamic>> itemsList = List<Map<String, dynamic>>.from(itemsRes);
+      final List<Map<String, dynamic>> rawItemsList = List<Map<String, dynamic>>.from(itemsRes);
       
-      for (var item in itemsList) {
+      // Visual grouping helper
+      String getVisualIdentity(Map<String, dynamic> item) {
+         final String name = (item['item_name'] ?? '').toString().trim();
+         final double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+         
+         final String note = (item['note'] ?? '').toString()
+             .replaceAll(RegExp(r'\| 刪除:.*'), '')
+             .trim();
+             
+         final List<dynamic> mods = item['modifiers'] ?? item['selected_modifiers'] ?? [];
+         final List<String> modNames = mods
+             .map((m) => (m is Map ? m['name']?.toString() ?? '' : m.toString()).trim())
+             .where((n) => n.isNotEmpty)
+             .toList()
+             ..sort();
+         final String modStr = modNames.join('|');
+         
+         // In TableInfo we also need to respect created_at batches down to seconds
+         final String cAtStr = item['created_at']?.toString() ?? '';
+         String batchKey = '';
+         if (cAtStr.isNotEmpty) {
+             final dt = DateTime.parse(cAtStr).toLocal();
+             batchKey = "${dt.year}/${dt.month}/${dt.day} ${dt.hour}:${dt.minute}:${dt.second}";
+         }
+         
+         // We also don't merge cancelled with non-cancelled
+         final String status = item['status'] ?? '';
+
+         return "$name|$price|$note|$modStr|$batchKey|$status";
+      }
+
+      List<Map<String, dynamic>> consolidated = [];
+      
+      for (var item in rawItemsList) {
         if (item['status'] != 'cancelled') {
            double price = (item['price'] as num).toDouble();
            final mods = item['modifiers'];
@@ -92,12 +125,40 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
            }
            tempTotal += price * (item['quantity'] as num);
         }
+
+        bool found = false;
+        final String identity = getVisualIdentity(item);
+        
+        for (var c in consolidated) {
+           if (identity == getVisualIdentity(c)) {
+              c['quantity'] = (c['quantity'] as num).toInt() + (item['quantity'] as num).toInt();
+              // Store all source IDs to allow batch deletion
+              List<String> sIds = List<String>.from(c['_source_ids'] ?? [c['id']]);
+              sIds.add(item['id']);
+              c['_source_ids'] = sIds;
+              
+              // Also accumulate raw items for batch print or complex voids
+              List<Map<String, dynamic>> srcItems = List<Map<String, dynamic>>.from(c['_source_items'] ?? [Map<String, dynamic>.from(c)]);
+              srcItems.add(Map<String, dynamic>.from(item));
+              c['_source_items'] = srcItems;
+              
+              found = true;
+              break;
+           }
+        }
+        
+        if (!found) {
+           final newItem = Map<String, dynamic>.from(item);
+           newItem['_source_ids'] = [item['id']];
+           newItem['_source_items'] = [Map<String, dynamic>.from(item)];
+           consolidated.add(newItem);
+        }
       }
 
       if (mounted) {
         setState(() {
           orderGroupData = groupRes;
-          orderItems = itemsList;
+          orderItems = consolidated;
           totalAmount = tempTotal;
           isLoading = false;
         });
@@ -115,9 +176,10 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
   Future<void> _deleteItem(int index) async {
     await _ensureRepository();
     final item = orderItems[index];
-    final String itemId = item['id'];
+    final List<String> sourceIds = List<String>.from(item['_source_ids'] ?? [item['id']]);
+    final List<Map<String, dynamic>> sourceItems = List<Map<String, dynamic>>.from(item['_source_items'] ?? [item]);
     
-    // Calculate total including modifiers
+    // Calculate total including modifiers for UI optimistic update matches the consolidated item
     double price = (item['price'] as num).toDouble();
     if (item['modifiers'] != null && item['modifiers'] is List) {
         for (var m in (item['modifiers'] as List)) {
@@ -135,34 +197,35 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
     });
 
     try {
-      // 2. Call Repository Void
-      // Construct OrderItem entity
-      List<Map<String, dynamic>> selectedModifiers = [];
-      if (item['modifiers'] != null && item['modifiers'] is List) {
-          selectedModifiers = List<Map<String, dynamic>>.from(item['modifiers']);
-      }
-      
-      final orderItemEntity = OrderItem(
-        id: itemId,
-        menuItemId: item['menu_item_id'] ?? item['item_id'] ?? '', // Handle varied naming
-        itemName: item['item_name'],
-        quantity: (item['quantity'] as num).toInt(),
-        price: (item['price'] as num).toDouble(),
-        status: 'submitted', // Was submitted before void
-        targetPrintCategoryIds: List<String>.from(item['target_print_category_ids'] ?? []),
-        selectedModifiers: selectedModifiers,
-        note: item['note'] ?? ''
-      );
+      // 2. Call Repository Void for EACH source item
+      for (var srcItem in sourceItems) {
+          List<Map<String, dynamic>> selectedModifiers = [];
+          if (srcItem['modifiers'] != null && srcItem['modifiers'] is List) {
+              selectedModifiers = List<Map<String, dynamic>>.from(srcItem['modifiers']);
+          }
+          
+          final orderItemEntity = OrderItem(
+            id: srcItem['id'],
+            menuItemId: srcItem['menu_item_id'] ?? srcItem['item_id'] ?? '',
+            itemName: srcItem['item_name'],
+            quantity: (srcItem['quantity'] as num).toInt(),
+            price: (srcItem['price'] as num).toDouble(),
+            status: 'submitted', 
+            targetPrintCategoryIds: List<String>.from(srcItem['target_print_category_ids'] ?? []),
+            selectedModifiers: selectedModifiers,
+            note: srcItem['note'] ?? ''
+          );
 
-      await _repository!.voidOrderItem(
-        orderGroupId: widget.orderGroupId,
-        item: orderItemEntity,
-        tableName: widget.tableName,
-        orderGroupPax: orderGroupData?['pax'] ?? 0,
-        staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty) 
-               ? ref.read(authStateProvider).value!.name 
-               : (ref.read(authStateProvider).value?.email ?? ''),
-      );
+          await _repository!.voidOrderItem(
+            orderGroupId: widget.orderGroupId,
+            item: orderItemEntity,
+            tableName: widget.tableName,
+            orderGroupPax: orderGroupData?['pax'] ?? 0,
+            staffName: (ref.read(authStateProvider).value?.name != null && ref.read(authStateProvider).value!.name.trim().isNotEmpty) 
+                   ? ref.read(authStateProvider).value!.name 
+                   : (ref.read(authStateProvider).value?.email ?? ''),
+          );
+      }
 
       // 4. Show Undo SnackBar
       if (mounted) {
@@ -174,7 +237,7 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
             action: SnackBarAction(
               label: '復原',
               textColor: Theme.of(context).colorScheme.primary,
-              onPressed: () => _undoDeleteItem(index, itemId, itemTotal),
+              onPressed: () => _undoDeleteItem(index, sourceIds, itemTotal),
             ),
             duration: const Duration(seconds: 4),
           ),
@@ -225,7 +288,7 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
     }
   }
 
-  Future<void> _undoDeleteItem(int index, String itemId, double itemTotal) async {
+  Future<void> _undoDeleteItem(int index, List<String> itemIds, double itemTotal) async {
     setState(() {
       orderItems[index]['status'] = 'submitted'; 
       totalAmount += itemTotal;
@@ -235,7 +298,7 @@ class _TableInfoScreenState extends ConsumerState<TableInfoScreen> {
       await Supabase.instance.client
           .from('order_items')
           .update({'status': 'submitted'})
-          .eq('id', itemId);
+          .inFilter('id', itemIds);
     } catch (e) {
       debugPrint("Undo error: $e");
       _loadData();

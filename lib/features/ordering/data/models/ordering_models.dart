@@ -134,6 +134,7 @@ class OrderContextMapper {
       peopleCount: groupRow['pax'] ?? 0,
       paxAdult: groupRow['pax_adult'] ?? 0,
       paxChild: groupRow['pax_child'] ?? 0,
+      staffName: groupRow['staff_name'] ?? '',
     );
   }
 

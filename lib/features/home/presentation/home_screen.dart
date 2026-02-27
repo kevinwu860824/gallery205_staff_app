@@ -207,6 +207,75 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // [新增] 關帳前檢查未結單桌位
+  Future<bool> _checkActiveOrdersBeforeSettlement() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shopId = prefs.getString('savedShopId');
+    if (shopId == null) return true;
+
+    setState(() => isLoading = true);
+
+    try {
+      final res = await Supabase.instance.client
+          .from('order_groups')
+          .select('table_names')
+          .eq('shop_id', shopId)
+          .neq('status', 'completed')
+          .neq('status', 'cancelled');
+      
+      if (res.isNotEmpty) {
+        final List<String> tableNames = (res as List)
+            .expand((row) => (row['table_names'] as String).split(','))
+            .toSet()
+            .toList();
+        
+        tableNames.sort();
+
+        if (mounted) {
+          setState(() => isLoading = false);
+          await showDialog(
+            context: context,
+            builder: (context) => _DarkStyleDialog(
+              title: "尚有未結桌位",
+              contentWidget: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("請先結清或取消以下桌位的訂單，\n才能進行關帳與結算：", 
+                    style: TextStyle(color: Colors.white70, fontSize: 16), 
+                    textAlign: TextAlign.center
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: tableNames.map((name) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    )).toList(),
+                  ),
+                ],
+              ),
+              confirmText: "前往結帳",
+              onConfirm: () => context.push('/selectArea'),
+              cancelText: "取消",
+              onCancel: () => Navigator.pop(context),
+            ),
+          );
+        }
+        return false;
+      }
+    } catch (e) {
+      debugPrint("Check active orders failed: $e");
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -281,6 +350,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: button.route != null
                               ? () async {
                                   if (_isEditing) return;
+                                  
+                                  // [新增] 關帳提前檢查
+                                  if (button.id == 'cashflow') {
+                                    final proceed = await _checkActiveOrdersBeforeSettlement();
+                                    if (!proceed) return;
+                                  }
+
                                   await context.push(button.route!);
                                   if (mounted) {
                                     _scheduleKey.currentState?.refresh();
@@ -1404,4 +1480,66 @@ class _HomeVisualEvent {
     required this.end,
     required this.eventId,
   });
+}
+class _DarkStyleDialog extends StatelessWidget {
+  final String title;
+  final Widget contentWidget;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+  final String? confirmText;
+  final String? cancelText;
+
+  const _DarkStyleDialog({
+    required this.title,
+    required this.contentWidget,
+    required this.onCancel,
+    required this.onConfirm,
+    this.confirmText,
+    this.cancelText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor, 
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title, style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            contentWidget,
+            const SizedBox(height: 30),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                TextButton(
+                  onPressed: onCancel,
+                  child: Text(cancelText ?? "取消", style: TextStyle(color: Theme.of(context).disabledColor, fontSize: 16)),
+                ),
+                SizedBox(
+                  width: 120, height: 40,
+                  child: ElevatedButton(
+                    onPressed: onConfirm,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.onSurface,
+                      foregroundColor: Theme.of(context).colorScheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                    ),
+                    child: Text(confirmText ?? "確認", style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

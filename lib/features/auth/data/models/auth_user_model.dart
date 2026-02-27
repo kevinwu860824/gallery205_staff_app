@@ -17,7 +17,7 @@ class AuthUserModel extends AuthUser {
       shopId: json['shopId'],
       shopCode: json['shopCode'],
       role: json['role'],
-      name: (json['name'] != null && json['name'].isNotEmpty) ? json['name'] : (json['email'] ?? ''),
+      name: (json['name'] != null && json['name'].toString().trim().isNotEmpty) ? json['name'] : (json['email'] ?? ''),
     );
   }
 

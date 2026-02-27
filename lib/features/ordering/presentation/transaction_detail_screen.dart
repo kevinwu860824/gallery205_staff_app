@@ -181,8 +181,8 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       
       for (var event in allEvents) {
         final dt = event['time'] as DateTime;
-        // Use Milliseconds to distinguish batches within the same second
-        final String key = DateFormat('yyyy/MM/dd HH:mm:ss.SSS').format(dt);
+        // Use Seconds to distinguish batches (ignore milliseconds which might be altered by DB insert serialization)
+        final String key = DateFormat('yyyy/MM/dd HH:mm:ss').format(dt);
         groupedBatches.putIfAbsent(key, () => []).add(event['item']);
       }
       
@@ -190,9 +190,12 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       final sortedKeys = groupedBatches.keys.toList()..sort();
       final Map<String, List<Map<String, dynamic>>> sortedMap = {};
       for (var k in sortedKeys) {
-        sortedMap[k] = groupedBatches[k]!;
+        sortedMap[k] = _consolidateItemsList(groupedBatches[k]!);
       }
       groupedBatches = sortedMap;
+      
+      // Also consolidate the main items list (for Customer Details view)
+      items = _consolidateItemsList(items);
 
     } catch (e) {
       debugPrint("Load transaction error: $e");
@@ -211,6 +214,55 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
     // For now, using fully qualified or assume imports added.
     final dataSource = OrderingRemoteDataSourceImpl(client);
     _repository = OrderingRepositoryImpl(dataSource, prefs);
+  }
+
+  // Visual grouping of exact same items within the same timeline batch
+  List<Map<String, dynamic>> _consolidateItemsList(List<Map<String, dynamic>> raw) {
+    List<Map<String, dynamic>> consolidated = [];
+    
+    // Helper to generate a stable "Identity Key" for visual comparison
+    String getVisualIdentity(Map<String, dynamic> item) {
+       final String name = (item['item_name'] ?? '').toString().trim();
+       final double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+       
+       // Handle Note: remove our specific split/deleted tags for visual identity
+       final String note = (item['note'] ?? '').toString()
+           .replaceAll(RegExp(r'\| 刪除:.*'), '')
+           .trim();
+           
+       // Handle Modifiers: Sort names to ensure stable string representation regardless of DB order
+       final List<dynamic> mods = item['modifiers'] ?? item['selected_modifiers'] ?? [];
+       final List<String> modNames = mods
+           .map((m) => (m is Map ? m['name']?.toString() ?? '' : m.toString()).trim())
+           .where((n) => n.isNotEmpty)
+           .toList()
+           ..sort();
+       final String modStr = modNames.join('|');
+       
+       final bool isDeletion = item['_is_deletion_record'] == true;
+       // We ignore status (submitted/preparing/etc) for visual consolidation in the bill view
+       // unless it's strictly a cancellation/deletion event.
+       
+       return "$name|$price|$note|$modStr|$isDeletion";
+    }
+    
+    for (var item in raw) {
+      bool found = false;
+      final String identity = getVisualIdentity(item);
+
+      for (var c in consolidated) {
+        if (identity == getVisualIdentity(c)) {
+          c['quantity'] = (c['quantity'] as num).toInt() + (item['quantity'] as num).toInt();
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        consolidated.add(Map<String, dynamic>.from(item));
+      }
+    }
+    return consolidated;
   }
 
   Future<void> _processVoid() async {
@@ -305,7 +357,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
               itemName: itemMap['item_name'],
               quantity: itemMap['quantity'] ?? 1,
               price: (itemMap['price'] as num).toDouble(),
-              status: status ?? 'submitted',
+              status: status, // status is now guaranteed non-null
               note: itemMap['note'] ?? '',
               targetPrintCategoryIds: List<String>.from(itemMap['target_print_category_ids'] ?? []),
               selectedModifiers: List<Map<String, dynamic>>.from(itemMap['modifiers'] ?? itemMap['selected_modifiers'] ?? []),

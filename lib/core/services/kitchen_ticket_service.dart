@@ -60,6 +60,7 @@ class KitchenTicketServiceImpl implements KitchenTicketService {
        // 2b. Filter out only the items from THIS event to prevent duplicate printing of old items
        final orderContext = fullContext.copyWith(
           order: fullContext.order.copyWith(items: event.items),
+          staffName: (event.staffName != null && event.staffName!.isNotEmpty) ? event.staffName! : fullContext.staffName,
        );
 
        // 3. Process Printing
