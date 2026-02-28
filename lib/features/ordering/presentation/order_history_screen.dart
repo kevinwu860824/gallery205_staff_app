@@ -117,6 +117,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
        if (widget.currentShiftOnly) {
         if (currentOpenId != null) {
            queryBuilder = queryBuilder.eq('open_id', currentOpenId);
+           queryBuilder = queryBuilder.neq('status', 'merged'); // 隱藏已併單的幽靈單
            queryBuilder = queryBuilder.order('created_at', ascending: false);
         } else {
            if (mounted) setState(() { orders = []; isLoading = false; });

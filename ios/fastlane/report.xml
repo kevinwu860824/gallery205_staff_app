@@ -10,17 +10,17 @@
       </testcase>
     
       
-      <testcase classname="fastlane.lanes" name="1: increment_build_number" time="0.302583">
+      <testcase classname="fastlane.lanes" name="1: increment_build_number" time="0.306171">
         
       </testcase>
     
       
-      <testcase classname="fastlane.lanes" name="2: build_app" time="489.294991">
+      <testcase classname="fastlane.lanes" name="2: build_app" time="604.043167">
         
       </testcase>
     
       
-      <testcase classname="fastlane.lanes" name="3: upload_to_testflight" time="431.506314">
+      <testcase classname="fastlane.lanes" name="3: upload_to_testflight" time="362.777442">
         
       </testcase>
     

@@ -721,6 +721,7 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
           .eq('shop_id', _shopId!)
           .neq('status', 'completed')
           .neq('status', 'cancelled')
+          .neq('status', 'merged')
           .limit(1);
 
       if (activeOrders.isNotEmpty) {
