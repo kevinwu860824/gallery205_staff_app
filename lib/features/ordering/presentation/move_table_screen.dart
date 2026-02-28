@@ -51,7 +51,8 @@ class _MoveTableScreenState extends State<MoveTableScreen> {
   @override
   void initState() {
     super.initState();
-    _currentSelection.addAll(widget.currentSeats);
+    // 移除預設勾選現在的桌位，讓使用者直接點擊新桌位即可
+    // _currentSelection.addAll(widget.currentSeats);
     _initData();
   }
 

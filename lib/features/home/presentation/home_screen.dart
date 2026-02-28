@@ -221,7 +221,8 @@ class _HomeScreenState extends State<HomeScreen> {
           .select('table_names')
           .eq('shop_id', shopId)
           .neq('status', 'completed')
-          .neq('status', 'cancelled');
+          .neq('status', 'cancelled')
+          .neq('status', 'merged');
       
       if (res.isNotEmpty) {
         final List<String> tableNames = (res as List)

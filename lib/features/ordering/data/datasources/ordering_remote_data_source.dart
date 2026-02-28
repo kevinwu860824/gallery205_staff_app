@@ -163,44 +163,97 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
     Map<String, dynamic>? taxSnapshot,
     String? staffName,
   }) async {
-    // 1. Smart Color Assignment Logic
+    // 1. Smart Distance-Aware Color Assignment Logic
     int assignedColorIndex = 0;
     try {
-      // Fetch currently active colors
-      final activeColorsRes = await supabaseClient
-          .from('order_groups')
-          .select('color_index')
-          .eq('shop_id', shopId)
-          .eq('status', 'dining'); // Only check active dining tables
+      final String primaryTableName = tableNames.isNotEmpty ? tableNames.first : '';
       
-      final Set<int> usedIndices = {};
-      for (final row in activeColorsRes) {
-        if (row['color_index'] != null) {
-           usedIndices.add(row['color_index'] as int);
-        }
+      // 1.1 取得全店所有桌位座標
+      final tablesRes = await supabaseClient
+          .from('tables')
+          .select('table_name, x, y')
+          .eq('shop_id', shopId);
+          
+      final Map<String, Map<String, double>> tableCoords = {};
+      for (var row in tablesRes) {
+         tableCoords[row['table_name'] as String] = {
+            'x': (row['x'] as num?)?.toDouble() ?? 0.0,
+            'y': (row['y'] as num?)?.toDouble() ?? 0.0,
+         };
+      }
+      
+      // 1.2 取得我的桌位座標
+      final myCoords = tableCoords[primaryTableName];
+      
+      // 1.3 取得現有正在用餐的訂單與所屬桌位
+      final activeOrdersRes = await supabaseClient
+          .from('order_groups')
+          .select('id, table_names, color_index')
+          .eq('shop_id', shopId)
+          .eq('status', 'dining');
+
+      final Set<int> allUsedColors = {};
+      final Set<int> nearbyUsedColors = {}; // 鄰桌禁用的顏色
+      
+      const double neighborDistanceThreshold = 250.0; // 鄰居判定距離 (pixels)
+
+      for (var row in activeOrdersRes) {
+         if (row['color_index'] == null) continue;
+         final int colorUsed = row['color_index'] as int;
+         allUsedColors.add(colorUsed);
+         
+         // 如果我有座標，檢查別人是不是鄰桌
+         if (myCoords != null) {
+            final List<String> groupTables = List<String>.from(row['table_names'] ?? []);
+            bool isNeighbor = false;
+            
+            for (String otherTableName in groupTables) {
+               final otherCoords = tableCoords[otherTableName];
+               if (otherCoords != null) {
+                  final dx = myCoords['x']! - otherCoords['x']!;
+                  final dy = myCoords['y']! - otherCoords['y']!;
+                  final distanceSq = dx * dx + dy * dy;
+                  
+                  if (distanceSq <= neighborDistanceThreshold * neighborDistanceThreshold) {
+                     isNeighbor = true;
+                     break;
+                  }
+               }
+            }
+            if (isNeighbor) {
+               nearbyUsedColors.add(colorUsed);
+            }
+         }
       }
 
-      // Find first available index in 0..19
-      // If all 20 are used, pick one at random or rotate
-      bool found = false;
+      // 1.4 三層優先級選色
+      List<int> availableP1 = []; // P1: 全店完全沒人用過
+      List<int> availableP2 = []; // P2: 有人過，但絕對不在鄰桌禁用名單 (非鄰居)
+      
       for (int i = 0; i < 20; i++) {
-        if (!usedIndices.contains(i)) {
-          assignedColorIndex = i;
-          found = true;
-          break;
-        }
+         if (!allUsedColors.contains(i)) {
+            availableP1.add(i);
+         } else if (!nearbyUsedColors.contains(i)) {
+            availableP2.add(i);
+         }
       }
       
-      if (!found) {
-        // Fallback: Pick random or just 0
-        assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 20;
+      // 為了不要每次都總是按照 0,1,2 順序 (大家顏色會太相似)，我們加入隨機洗牌
+      availableP1.shuffle();
+      availableP2.shuffle();
+
+      if (availableP1.isNotEmpty) {
+         assignedColorIndex = availableP1.first;
+      } else if (availableP2.isNotEmpty) {
+         assignedColorIndex = availableP2.first;
+      } else {
+         // P3: 極端情況 (整間店完全塞滿，且所有 20 個顏色都在鄰座出現...) -> Fallback 隨機
+         assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 20;
       }
     } catch (e) {
-      // If column doesn't exist or query fails, fallback to random basic hash logic equivalent
-      // But we generally want to persist an index. 
-      // We'll just default to 0 or random here to be safe.
+      // 若查詢出錯，退到原本的安全亂數
       assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 20;
-      print("Color assignment warning: $e");
+      print("Color assignment fallback error: $e");
     }
 
     // 1.5 Get Active Open ID
