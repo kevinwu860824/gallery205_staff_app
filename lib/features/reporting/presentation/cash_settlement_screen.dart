@@ -508,8 +508,9 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
       // So we fetch all payments for this open_id and aggregate locally.
       final paymentsRes = await supabase
           .from('order_payments')
-          .select('payment_method, amount, order_groups!inner(status)')
+          .select('payment_method, amount, order_groups!inner(status, shop_id)')
           .eq('open_id', _currentOpenId!)
+          .eq('order_groups.shop_id', _shopId!)
           .neq('order_groups.status', 'cancelled');
           
       final Map<String, double> methodTotals = {};
