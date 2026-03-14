@@ -70,6 +70,9 @@ dependencies:
   image_picker: ^1.1.1
   mobile_scanner: ^6.0.0
   
+  # --- Error Tracking ---
+  sentry_flutter: ^8.14.0
+
   # --- ML & AI ---
   google_mlkit_text_recognition: ^0.15.0
   google_mlkit_barcode_scanning: ^0.14.1
