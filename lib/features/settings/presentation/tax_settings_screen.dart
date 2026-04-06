@@ -124,17 +124,23 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
   }
 
   void _showErrorDialog(String msg) {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
     showCupertinoDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("設定失敗", style: TextStyle(color: Colors.red)),
-        content: Text(msg.replaceAll("Exception: ", "").replaceAll("EdgeFunctionException: ", "")),
-        actions: [
-          TextButton(
-             onPressed: () => Navigator.pop(ctx),
-             child: const Text("我知道了")
-          )
-        ],
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
+        child: AlertDialog(
+          title: const Text("設定失敗", style: TextStyle(color: Colors.red)),
+          content: Text(msg.replaceAll("Exception: ", "").replaceAll("EdgeFunctionException: ", "")),
+          actions: [
+            TextButton(
+               onPressed: () => Navigator.pop(ctx),
+               child: const Text("我知道了")
+            )
+          ],
+        ),
       )
     );
   }
@@ -142,16 +148,19 @@ class _TaxSettingsScreenState extends State<TaxSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet
+        ? (MediaQuery.of(context).size.width - 600) / 2
+        : 16.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("稅務設定"),
-        backgroundColor: theme.cardColor,
       ),
       body: isLoading 
           ? const Center(child: CupertinoActivityIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               children: [
                 _buildSectionTitle("稅率設定"),
                 

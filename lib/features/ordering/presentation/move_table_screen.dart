@@ -20,7 +20,7 @@ const List<Color> _groupColors = [
       Color(0xFF5E5CE6), // Indigo
       Color(0xFFBF5AF2), // Purple
       Color(0xFF64D2FF), // Light Blue
-      Color(0xFF30D158), // Emerald Green
+      Color(0xFFFF375F), // Rose
       Color(0xFFD1D1D6), // Light Grey
   ];
 
@@ -160,11 +160,15 @@ class _MoveTableScreenState extends State<MoveTableScreen> {
 
     try {
       if (_repository == null) return;
-      
+
+      final newTablesList = _currentSelection.toList();
+      final colorIndex = await _repository!.pickColorForTables(newTablesList);
+
       await _repository!.moveTable(
         hostGroupId: widget.groupKey,
         oldTables: widget.currentSeats,
-        newTables: _currentSelection.toList(),
+        newTables: newTablesList,
+        colorIndex: colorIndex,
       );
 
       if (mounted) {

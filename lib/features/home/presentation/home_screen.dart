@@ -134,6 +134,8 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) => const _NotificationPopup(),
     );
     if (mounted) {
+      setState(() => _unreadCount = 0);
+      FlutterAppBadger.removeBadge();
       _fetchUnreadCount();
     }
   }
@@ -150,13 +152,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _HomeButton(id: 'dashboard', label: l10n.homeBackhouse, icon: CupertinoIcons.chart_bar_alt_fill, route: '/dashboard', permissionKey: AppPermissions.homeBackDashboard),
       _HomeButton(id: 'daily', label: l10n.homeDailyCost, icon: CupertinoIcons.money_dollar, route: '/costInput', permissionKey: AppPermissions.homeDailyCost),
       _HomeButton(id: 'cashflow', label: l10n.homeCashFlow, icon: CupertinoIcons.doc_chart, route: '/cashSettlement', permissionKey: AppPermissions.homeCashFlow),
-      _HomeButton(id: 'scan', label: 'AI Scan', icon: CupertinoIcons.viewfinder, route: '/smartScanner', permissionKey: AppPermissions.homeScan),
-      
       _HomeButton(id: 'calendar', label: l10n.homeCalendar, icon: CupertinoIcons.calendar, route: '/personalSchedule', permissionKey: null),
       _HomeButton(id: 'shift', label: l10n.homeShift, icon: CupertinoIcons.briefcase, route: '/scheduleView', permissionKey: null),
       _HomeButton(id: 'punch', label: l10n.homeClockIn, icon: CupertinoIcons.person, route: '/punchIn', permissionKey: null),
       _HomeButton(id: 'report', label: l10n.homeWorkReport, icon: CupertinoIcons.pencil_ellipsis_rectangle, route: '/workReport', permissionKey: null),
       _HomeButton(id: 'todo', label: '待辦事項', icon: CupertinoIcons.checkmark_square, route: '/todoList', permissionKey: null),
+      _HomeButton(id: 'ocr_test', label: '進貨辨識', icon: CupertinoIcons.camera, route: '/ocrTest', permissionKey: null),
       _HomeButton(id: 'settings', label: l10n.homeSetting, icon: CupertinoIcons.settings, route: '/settings', permissionKey: null),
     ];
 
@@ -296,6 +297,134 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final isTablet = shortestSide >= 600;
+
+    Widget buildIconGrid() {
+      return ReorderableGridView.count(
+        crossAxisCount: isTablet ? 6 : 4,
+        crossAxisSpacing: isTablet ? 15 : 16,
+        mainAxisSpacing: 0,
+        childAspectRatio: isTablet ? 1.25 : 0.75,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        onReorder: (oldIndex, newIndex) {
+          setState(() {
+            final element = _currentButtons.removeAt(oldIndex);
+            _currentButtons.insert(newIndex, element);
+          });
+          _saveButtonOrder();
+        },
+        children: _currentButtons.map((button) {
+          return _LiquidGlassIcon(
+            key: ValueKey(button.id),
+            label: button.label,
+            icon: button.icon,
+            isEditing: _isEditing,
+            isTablet: isTablet,
+            onPressed: button.route != null
+                ? () async {
+                    if (_isEditing) return;
+                    if (button.id == 'cashflow') {
+                      final proceed = await _checkActiveOrdersBeforeSettlement();
+                      if (!proceed) return;
+                    }
+                    await context.push(button.route!);
+                    if (mounted) {
+                      _scheduleKey.currentState?.refresh();
+                    }
+                  }
+                : null,
+            onLongPress: _enterEditMode,
+          );
+        }).toList(),
+      );
+    }
+
+    // ── iPad 版 ──────────────────────────────────────────────
+    if (isTablet) {
+      // 計算 icon 視覺邊界偏移量，讓行事曆與 icon 左右對齊
+      const double outerPadding = 100;
+      const double tabletIconSize = 60.0;
+      const int tabletColumns = 6;
+      const double tabletSpacing = 15.0;
+      final double availableWidth = MediaQuery.of(context).size.width - outerPadding * 2;
+      final double cellWidth = (availableWidth - (tabletColumns - 1) * tabletSpacing) / tabletColumns;
+      final double iconVisualOffset = (cellWidth - tabletIconSize) / 2;
+
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: Stack(
+          children: [
+            SafeArea(
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: outerPadding),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 51),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: iconVisualOffset),
+                        child: IgnorePointer(
+                          ignoring: _isEditing,
+                          child: Opacity(
+                            opacity: _isEditing ? 0.6 : 1.0,
+                            child: _ScheduleWidget(
+                              key: _scheduleKey,
+                              l10n: l10n,
+                              unreadCount: _unreadCount,
+                              onBellTap: _showNotificationsDialog,
+                              height: 198,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 48),
+                      buildIconGrid(),
+                      const SizedBox(height: 80),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (_isEditing)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 10,
+                right: 100 + 24,
+                child: GestureDetector(
+                  onTap: _exitEditMode,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: Text(
+                      "Done",
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // ── 手機版（不動）────────────────────────────────────────
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
@@ -307,7 +436,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 12),
-                  
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
                     child: IgnorePointer(
@@ -317,64 +445,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: _ScheduleWidget(
                           key: _scheduleKey,
                           l10n: l10n,
-                          unreadCount: _unreadCount,           
-                          onBellTap: _showNotificationsDialog, 
+                          unreadCount: _unreadCount,
+                          onBellTap: _showNotificationsDialog,
                         ),
                       ),
                     ),
                   ),
-                  
                   const SizedBox(height: 27),
-                  
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: ReorderableGridView.count(
-                      crossAxisCount: MediaQuery.of(context).size.width > 600 ? 6 : 4,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 0,
-                      childAspectRatio: 0.75,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      onReorder: (oldIndex, newIndex) {
-                        setState(() {
-                          final element = _currentButtons.removeAt(oldIndex);
-                          _currentButtons.insert(newIndex, element);
-                        });
-                        _saveButtonOrder();
-                      },
-                      children: _currentButtons.map((button) {
-                        return _LiquidGlassIcon(
-                          key: ValueKey(button.id),
-                          label: button.label,
-                          icon: button.icon,
-                          isEditing: _isEditing,
-                          onPressed: button.route != null
-                              ? () async {
-                                  if (_isEditing) return;
-                                  
-                                  // [新增] 關帳提前檢查
-                                  if (button.id == 'cashflow') {
-                                    final proceed = await _checkActiveOrdersBeforeSettlement();
-                                    if (!proceed) return;
-                                  }
-
-                                  await context.push(button.route!);
-                                  if (mounted) {
-                                    _scheduleKey.currentState?.refresh();
-                                  }
-                                }
-                              : null,
-                          onLongPress: _enterEditMode, 
-                        );
-                      }).toList(),
-                    ),
+                    child: buildIconGrid(),
                   ),
                   const SizedBox(height: 80),
                 ],
               ),
             ),
           ),
-          
           if (_isEditing)
             Positioned(
               top: MediaQuery.of(context).padding.top + 10,
@@ -489,6 +575,7 @@ class _NotificationPopupState extends State<_NotificationPopup> {
           .eq('is_read', false);
       
       await _fetchAndReadNotifications();
+      FlutterAppBadger.removeBadge();
     } catch (e) {
       debugPrint('Error marking all as read: $e');
       if (mounted) setState(() => _loading = false);
@@ -497,9 +584,14 @@ class _NotificationPopupState extends State<_NotificationPopup> {
 
   @override
   Widget build(BuildContext context) {
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final isTablet = shortestSide >= 600;
+    final double hInset = isTablet
+        ? (MediaQuery.of(context).size.width - 750) / 2
+        : 20;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 60),
+      insetPadding: EdgeInsets.symmetric(horizontal: hInset, vertical: 60),
       child: Container(
         width: double.infinity,
         constraints: const BoxConstraints(maxHeight: 500),
@@ -627,12 +719,14 @@ class _ScheduleWidget extends StatefulWidget {
   final AppLocalizations l10n;
   final int unreadCount;
   final VoidCallback onBellTap;
+  final double height;
 
   const _ScheduleWidget({
-    super.key, 
+    super.key,
     required this.l10n,
     required this.unreadCount,
     required this.onBellTap,
+    this.height = 160.0,
   });
 
   @override
@@ -993,7 +1087,7 @@ class _ScheduleWidgetState extends State<_ScheduleWidget> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final isLight = Theme.of(context).brightness == Brightness.light;
-    const double widgetHeight = 160.0; 
+    final double widgetHeight = widget.height;
 
     return GestureDetector(
       onTap: () async {
@@ -1330,6 +1424,7 @@ class _LiquidGlassIcon extends StatefulWidget {
   final VoidCallback? onPressed;
   final VoidCallback? onLongPress;
   final bool isEditing;
+  final bool isTablet;
 
   const _LiquidGlassIcon({
     super.key,
@@ -1338,6 +1433,7 @@ class _LiquidGlassIcon extends StatefulWidget {
     this.onPressed,
     this.onLongPress,
     required this.isEditing,
+    this.isTablet = false,
   });
 
   @override
@@ -1392,13 +1488,13 @@ class _LiquidGlassIconState extends State<_LiquidGlassIcon> with SingleTickerPro
 
   @override
   Widget build(BuildContext context) {
-    const double iconSize = 62.0; 
+    final double iconSize = widget.isTablet ? 60.0 : 62.0;
     final isLight = Theme.of(context).brightness == Brightness.light;
 
     return GestureDetector(
       onTap: widget.isEditing ? null : widget.onPressed,
-      onLongPress: widget.isEditing ? null : widget.onLongPress, 
-      
+      onLongPress: widget.isEditing ? null : widget.onLongPress,
+
       child: AnimatedBuilder(
         animation: _animation,
         builder: (context, child) {
@@ -1416,24 +1512,20 @@ class _LiquidGlassIconState extends State<_LiquidGlassIcon> with SingleTickerPro
                 width: iconSize,
                 height: iconSize,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16.0), // iOS rounded square
-                  // ✅ [Modified] Use Theme Card Color for base
+                  borderRadius: BorderRadius.circular(16.0),
                   color: Theme.of(context).cardColor,
-                  // ✅ [Modified] Flat Color Block (No Gradient)
                   gradient: null,
                   boxShadow: isLight ? [
-                     BoxShadow(
+                    BoxShadow(
                       color: Colors.black.withOpacity(0.1),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     )
-                  ] : [], // ✅ [Modified] No Shadow for Flat Look
-
+                  ] : [],
                 ),
                 child: Center(
                   child: Icon(
                     widget.icon,
-                    // ✅ [Modified] Always use primary color (Sage=Green, Dark=White, Light=Black)
                     color: Theme.of(context).colorScheme.primary,
                     size: 30.0,
                   ),
@@ -1446,7 +1538,6 @@ class _LiquidGlassIconState extends State<_LiquidGlassIcon> with SingleTickerPro
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  // ✅ [Modified] Always use onSurface color (Sage=Light, Dark=White, Light=Black)
                   color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,

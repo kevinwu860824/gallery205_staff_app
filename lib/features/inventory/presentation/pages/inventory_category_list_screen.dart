@@ -64,14 +64,8 @@ class _InventoryCategoryListScreenState extends ConsumerState<InventoryCategoryL
       ),
     );
 
-    // Update is not implemented in provider explicitly yet, logic needs to be added to Notifier if desired.
-    // For now assuming add/delete approach or direct update calls via repository if needed.
-    // Given the previous code, edit category name wasn't heavily emphasized or was similar to add.
-    // Skipping implementation for brevity in Pilot unless essential.
-    // Wait, previous code had `_editCategory`.
-    // I should probably add `updateCategory` to notifier.
     if (result != null && result.isNotEmpty) {
-        // Implementation TODO: Add updateCategory method to Notifier
+      await ref.read(inventoryCategoriesProvider.notifier).updateCategory(id, result);
     }
   }
 

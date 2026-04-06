@@ -57,6 +57,8 @@
   "scheduleTabCustom": "Custom",
   "scheduleFilterTooltip": "Filter Groups",
   "scheduleSelectGroups": "Select Groups",
+  "scheduleSelectAll": "Select All",
+  "scheduleDeselectAll": "Deselect All",
   "commonDone": "Done",
   "schedulePersonalMe": "Personal (Me)",
   "scheduleUntitled": "Untitled",

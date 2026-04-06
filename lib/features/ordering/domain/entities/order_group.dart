@@ -22,7 +22,10 @@ class OrderGroup extends Equatable {
   final double? finalAmount;
   final int paxAdult;
   final int paxChild;
-  
+  final double? serviceFeeRate;
+  final double? discountAmount;
+  final String? note;
+
   const OrderGroup({
     required this.id,
     required this.status,
@@ -41,6 +44,9 @@ class OrderGroup extends Equatable {
     this.buyerUbn,
     this.paxAdult = 0,
     this.paxChild = 0,
+    this.serviceFeeRate,
+    this.discountAmount,
+    this.note,
   });
 
   @override
@@ -60,6 +66,9 @@ class OrderGroup extends Equatable {
     ezpayQrRight,
     paxAdult,
     paxChild,
+    serviceFeeRate,
+    discountAmount,
+    note,
   ];
 
   OrderGroup copyWith({
@@ -80,6 +89,9 @@ class OrderGroup extends Equatable {
     String? buyerUbn,
     int? paxAdult,
     int? paxChild,
+    double? serviceFeeRate,
+    double? discountAmount,
+    String? note,
   }) {
     return OrderGroup(
       id: id ?? this.id,
@@ -99,6 +111,9 @@ class OrderGroup extends Equatable {
       buyerUbn: buyerUbn ?? this.buyerUbn,
       paxAdult: paxAdult ?? this.paxAdult,
       paxChild: paxChild ?? this.paxChild,
+      serviceFeeRate: serviceFeeRate ?? this.serviceFeeRate,
+      discountAmount: discountAmount ?? this.discountAmount,
+      note: note ?? this.note,
     );
   }
 }

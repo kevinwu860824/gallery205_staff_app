@@ -22,10 +22,15 @@ import '../../features/ordering/presentation/print_bill_screen.dart';
 import '../../features/ordering/presentation/move_table_screen.dart';
 import '../../features/ordering/presentation/merge_table_screen.dart'; // NEW
 import '../../features/ordering/presentation/order_screen.dart';
-// ✅ [修改] 替換為 V2 版桌位選擇頁面
-import '../../features/ordering/presentation/table_selection_screen_v2.dart'; 
 import '../../features/ordering/presentation/table_info_screen.dart';
 import '../../features/ordering/presentation/payment_screen.dart'; // NEW
+import '../../features/ordering/presentation/transaction_detail_screen.dart';
+
+// ✅ [V2 Testing Flow]
+import '../../features/ordering/presentation/table_selection_screen_v3.dart'; 
+import '../../features/ordering/presentation/order_screen_v2.dart';
+import '../../features/ordering/presentation/print_bill_screen_v2.dart';
+import '../../features/ordering/presentation/payment_screen_v2.dart';
 import '../../features/ordering/presentation/transaction_detail_screen.dart';
 
 // --- Staff Management (人事) ---
@@ -77,6 +82,7 @@ import '../../features/settings/presentation/appearance_settings_screen.dart';
 import '../../features/settings/presentation/role_management_screen.dart';
 import '../../features/settings/presentation/tax_settings_screen.dart';
 import '../../features/settings/presentation/settings_category_screen.dart'; // NEW
+import '../../features/settings/presentation/hub_settings_screen.dart';
 
 // --- Reporting (報表) ---
 import '../../features/reporting/presentation/reporting_dashboard_screen.dart';
@@ -98,6 +104,9 @@ import '../../features/reporting/presentation/work_report_overview_screen.dart';
 
 // --- Todo ---
 import '../../features/todo/presentation/todo_list_screen.dart';
+
+// --- Purchasing (進貨) ---
+import '../../features/purchasing/presentation/ocr_test_screen.dart';
 
 // --- 子流程頁面 (使用 show 避免衝突) ---
 import '../../features/inventory/presentation/view_prep_screen.dart' show ItemSelectionScreen, ViewItemDetailScreen;
@@ -131,6 +140,7 @@ final GoRouter appRouter = GoRouter(
     GoRoute(path: '/editModifiers', builder: (context, state) => const EditModifiersScreen()), // NEW
     GoRoute(path: '/manageTableMap', builder: (context, state) => const ManageTableMapScreen()),
     GoRoute(path: '/printerSettings', builder: (context, state) => const PrinterSettingsScreen()),
+    GoRoute(path: '/hubSettings', builder: (context, state) => const HubSettingsScreen()),
     GoRoute(path: '/punchInSettings', builder: (context, state) => const PunchInSettingsScreen()),
     GoRoute(path: '/printTest', builder: (context, state) => const PrintTestScreen()), 
     GoRoute(path: '/paymentMethodSettings', builder: (context, state) => const PaymentMethodSettingsScreen()),
@@ -180,8 +190,7 @@ final GoRouter appRouter = GoRouter(
     //GoRoute(path: '/checkCash', builder: (context, state) => CheckCashOpenScreen()),
     //GoRoute(path: '/guestOrder', builder: (context, state) => const GuestOrderScreen()),
     
-    // ✅ [修改] 使用新的 TableSelectionScreenV2
-    GoRoute(path: '/selectArea', builder: (context, state) => const TableSelectionScreenV2()),
+    GoRoute(path: '/selectArea', builder: (context, state) => const TableSelectionScreenV3()),
     
     GoRoute(
       path: '/orderHistory',
@@ -221,6 +230,21 @@ final GoRouter appRouter = GoRouter(
         );
       },
     ),
+    GoRoute(
+      path: '/orderV2',
+      builder: (context, state) {
+        final args = state.extra as Map<String, dynamic>? ?? {};
+        final tableNumbers = args['tableNumbers'] as List<String>? ?? [];
+        final orderGroupId = args['orderGroupId'] as String?;
+        final isNewOrder = args['isNewOrder'] as bool? ?? true;
+        if (tableNumbers.isEmpty) return const Scaffold(body: Center(child: Text('錯誤：缺少桌號參數')));
+        return OrderScreenV2(
+          tableNumbers: tableNumbers,
+          orderGroupId: orderGroupId,
+          isNewOrder: isNewOrder,
+        );
+      },
+    ),
     /*GoRoute(
       path: '/editOrder',
       builder: (context, state) {
@@ -251,6 +275,17 @@ final GoRouter appRouter = GoRouter(
       },
     ),
     GoRoute(
+      path: '/printBillV2',
+      builder: (context, state) {
+        final args = state.extra is Map<String, dynamic> ? state.extra as Map<String, dynamic> : {};
+        final groupKey = args['groupKey'] as String? ?? '';
+        final title = args['title'] as String? ?? '';
+        final splitId = args['splitId'] as String?;
+        if (groupKey.isEmpty || title.isEmpty) return const Scaffold(body: Center(child: Text('錯誤：缺少帳單關鍵參數')));
+        return PrintBillScreenV2(groupKey: groupKey, title: title, splitId: splitId);
+      },
+    ),
+    GoRoute(
       path: '/payment',
       builder: (context, state) {
         final args = state.extra as Map<String, dynamic>? ?? {};
@@ -258,6 +293,16 @@ final GoRouter appRouter = GoRouter(
         final totalAmount = (args['totalAmount'] as num?)?.toDouble() ?? 0.0;
         if (groupKey.isEmpty) return const Scaffold(body: Center(child: Text('錯誤：缺少群組鍵')));
         return PaymentScreen(groupKey: groupKey, totalAmount: totalAmount);
+      },
+    ),
+    GoRoute(
+      path: '/paymentV2',
+      builder: (context, state) {
+        final args = state.extra as Map<String, dynamic>? ?? {};
+        final groupKey = args['groupKey'] as String? ?? '';
+        final totalAmount = (args['totalAmount'] as num?)?.toDouble() ?? 0.0;
+        if (groupKey.isEmpty) return const Scaffold(body: Center(child: Text('錯誤：缺少群組鍵')));
+        return PaymentScreenV2(groupKey: groupKey, totalAmount: totalAmount);
       },
     ),
 
@@ -322,11 +367,18 @@ final GoRouter appRouter = GoRouter(
         final args = state.extra is Map<String, dynamic> 
             ? state.extra as Map<String, dynamic> 
             : <String, dynamic>{};
-        final event = args['event']; 
-        final group = args['group']; 
+        final event = args['event'];
+        final group = args['group'];
+        final initialYear = args['initialYear'] as int?;
+        final initialMonth = args['initialMonth'] as int?;
+        final initialDay = args['initialDay'] as int?;
+        final initialDate = (initialYear != null && initialMonth != null && initialDay != null)
+            ? DateTime(initialYear, initialMonth, initialDay)
+            : null;
         return EventDetailScreen(
           event: event,
           group: group,
+          initialDate: initialDate,
         );
       },
     ),
@@ -482,6 +534,7 @@ final GoRouter appRouter = GoRouter(
     // Todo
     // --------------------------------------------------------------------------
     GoRoute(path: '/todoList', builder: (context, state) => const TodoListScreen()),
+    GoRoute(path: '/ocrTest', builder: (context, state) => const OcrTestScreen()),
     GoRoute(path: '/payroll', builder: (context, state) => const PayrollScreen()),
     GoRoute(
       path: '/payrollDetail', 

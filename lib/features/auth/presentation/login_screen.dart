@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_sfsymbols/flutter_sfsymbols.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:gallery205_staff_app/l10n/app_localizations.dart';
 import 'package:gallery205_staff_app/features/auth/presentation/providers/auth_providers.dart';
 import 'package:gallery205_staff_app/core/theme/app_theme.dart';
@@ -23,8 +25,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final TextEditingController newShopController = TextEditingController();
 
   String? selectedShopCode;
-  // We use this local flag to ensure we default-select the first shop only once
   bool _hasInitializedSelection = false;
+  List<BiometricType> _availableBiometrics = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBiometrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkVersion());
+  }
+
+  Future<void> _loadBiometrics() async {
+    try {
+      final biometrics = await auth.getAvailableBiometrics();
+      if (mounted) setState(() => _availableBiometrics = biometrics);
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -193,6 +209,61 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
+  // 比較版本號：回傳 true 表示 current < minimum
+  bool _isVersionOutdated(String current, String minimum) {
+    final c = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final m = minimum.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final len = c.length > m.length ? c.length : m.length;
+    for (int i = 0; i < len; i++) {
+      final cv = i < c.length ? c[i] : 0;
+      final mv = i < m.length ? m[i] : 0;
+      if (cv < mv) return true;
+      if (cv > mv) return false;
+    }
+    return false;
+  }
+
+  Future<void> _checkVersion() async {
+    if (!mounted) return;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final currentVersion = info.version;
+
+      final res = await Supabase.instance.client
+          .from('app_config')
+          .select('min_ios_version')
+          .eq('id', 'global')
+          .maybeSingle();
+
+      if (res == null) return;
+      final minVersion = res['min_ios_version'] as String? ?? '0.0.0';
+
+      if (_isVersionOutdated(currentVersion, minVersion) && mounted) {
+        _showUpdateDialog(currentVersion, minVersion);
+      }
+    } catch (e) {
+      debugPrint('Version check failed: $e');
+    }
+  }
+
+  void _showUpdateDialog(String current, String minimum) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Theme.of(ctx).cardColor,
+          title: const Text('需要更新'),
+          content: Text(
+            '目前版本 ($current) 已不支援，請至 TestFlight 更新至最新版本後再登入。',
+            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.8)),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showMessage(String message) {
      if (!mounted) return;
      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -240,6 +311,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // 2. Watch Saved Shops
     final savedShopsAsync = ref.watch(savedShopCodesProvider);
     final isLoggingIn = ref.watch(loginControllerProvider).isLoading;
+
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
@@ -330,7 +403,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Container(
                     width: double.infinity,
                     height: screenHeight * 0.65,
-                    child: SingleChildScrollView(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: isTablet ? 420 : double.infinity),
+                        child: SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(horizontal: 52.0),
                       child: AnimatedPadding(
                         padding: EdgeInsets.only(
@@ -481,10 +557,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                                 ),
                             ),
+                            if (_availableBiometrics.isNotEmpty) ...[
                             const SizedBox(height: 13),
-                            
-                            // FaceID Button
-                            // Unified Design: Always ElevatedButton (Solid Circle)
+
+                            // Biometric Button
                             ElevatedButton(
                               onPressed: isLoggingIn ? null : _loginWithFaceID,
                               style: ElevatedButton.styleFrom(
@@ -499,31 +575,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ),
                                 padding: EdgeInsets.zero,
                               ),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Icon(
-                                    CupertinoIcons.viewfinder,
-                                    size: 40,
-                                    // Use property from style (foregroundColor) automatically? 
-                                    // Icon color defaults to IconTheme which might not pick up ElevatedButton foreground automatically if set explicitly.
-                                    // Let's use explicit color based on logic to be safe.
-                                    color: Theme.of(context).cardColor.value == AppColors.sageCardBackground.value 
-                                        ? AppColors.sageCardBackground 
-                                        : const Color(0xFF222222),
-                                  ),
-                                  Icon(
-                                    CupertinoIcons.person_fill,
-                                    size: 20,
-                                    color: Theme.of(context).cardColor.value == AppColors.sageCardBackground.value 
-                                        ? AppColors.sageCardBackground 
-                                        : const Color(0xFF222222),
-                                  ),
-                                ],
+                              child: Icon(
+                                _availableBiometrics.contains(BiometricType.face)
+                                    ? Icons.face
+                                    : Icons.fingerprint,
+                                size: 36,
+                                color: Theme.of(context).cardColor.value == AppColors.sageCardBackground.value
+                                    ? AppColors.sageCardBackground
+                                    : const Color(0xFF222222),
                               ),
                             ),
+                            ], // end biometrics
                             const SizedBox(height: 40),
                           ],
+                        ),
+                      ),
                         ),
                       ),
                     ),

@@ -91,8 +91,10 @@ serve(async (req) => {
         const checkValue = await sha256(`${ezpaySettings.hash_key}${aesEncrypted}${ezpaySettings.hash_iv}`);
 
         // 5. Call ezPay API
-        // IMPORTANT: In production, ensure EZPAY_INVALID_URL is set to https://einvoice.ezpay.com.tw/Api/invoice_invalid
-        const ezpayUrl = Deno.env.get('EZPAY_INVALID_URL') || 'https://cinv.ezpay.com.tw/Api/invoice_invalid';
+        // Production: https://einvoice.ezpay.com.tw/Api/invoice_invalid
+        // Sandbox:    https://cinv.ezpay.com.tw/Api/invoice_invalid
+        const ezpayUrl = Deno.env.get('EZPAY_INVALID_URL');
+        if (!ezpayUrl) throw new Error('EZPAY_INVALID_URL environment variable is not set. Please configure it in Supabase Dashboard → Project Settings → Edge Functions.');
         const postData = new URLSearchParams();
         postData.append('MerchantID_', ezpaySettings.merchant_id);
         postData.append('PostData_', aesEncrypted);

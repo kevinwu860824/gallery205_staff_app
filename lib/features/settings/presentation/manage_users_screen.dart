@@ -98,11 +98,11 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
       final response = await supabase
           .from('user_shop_map')
           .select('''
-            user_id, role_id, 
-            salary_type, base_wage, 
-            dob, id_number, enroll_date, 
-            phone, address, 
-            bank_code, bank_account, 
+            user_id, role_id, is_active,
+            salary_type, base_wage,
+            dob, id_number, enroll_date,
+            phone, address,
+            bank_code, bank_account,
             emergency_contact, emergency_phone,
             shop_roles(name), users(email, name)
           ''')
@@ -141,6 +141,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
           'bank_account': item['bank_account'],
           'emergency_contact': item['emergency_contact'],
           'emergency_phone': item['emergency_phone'],
+          'is_active': item['is_active'] ?? true,
         });
       }
 
@@ -160,9 +161,47 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
 
   bool _canModify(Map<String, dynamic> targetUser) {
     if (targetUser['email'] == currentUserEmail) return false;
-    
+
     final myRole = currentUserRoleName?.toLowerCase() ?? '';
     return myRole.contains('owner') || myRole.contains('manager') || myRole.contains('admin');
+  }
+
+  Future<void> _toggleActiveStatus(Map<String, dynamic> user, bool newValue) async {
+    final userId = user['user_id'];
+    debugPrint('[toggleActive] userId=$userId newValue=$newValue');
+    try {
+      final result = await supabase
+          .from('user_shop_map')
+          .update({'is_active': newValue})
+          .eq('user_id', userId)
+          .select('user_id, is_active');
+
+      debugPrint('[toggleActive] result=$result');
+
+      if (result.isEmpty) {
+        debugPrint('[toggleActive] WARNING: 0 rows updated');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('找不到對應的員工資料，未能更新')),
+          );
+        }
+        return;
+      }
+
+      setState(() {
+        for (final list in [users, _filteredUsers]) {
+          final idx = list.indexWhere((u) => u['user_id'] == userId);
+          if (idx >= 0) list[idx] = {...list[idx], 'is_active': newValue};
+        }
+      });
+    } catch (e) {
+      debugPrint('[toggleActive] ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('更新失敗: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _addUser() async {
@@ -282,7 +321,10 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     // ✅ Scaffold Structure
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -315,7 +357,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
             children: [
               // ✅ Search Bar
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                 child: CupertinoSearchTextField(
                   controller: _searchController,
                   placeholder: '搜尋姓名 (Search Name)...', // Localize if possible or hardcode for now
@@ -329,7 +371,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
               // ✅ User List
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), 
+                  padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                   itemCount: _filteredUsers.length,
                   itemBuilder: (_, i) {
                     final user = _filteredUsers[i];
@@ -339,6 +381,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
                       user: user,
                       onEdit: canModify ? () => _editUser(user) : null,
                       onDelete: canModify ? () => _deleteUser(user) : null,
+                      onToggleActive: canModify ? (val) => _toggleActiveStatus(user, val) : null,
                     );
                   },
                 ),
@@ -357,8 +400,9 @@ class _UserCard extends StatelessWidget {
   final Map user;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final Function(bool)? onToggleActive;
 
-  const _UserCard({required this.user, this.onEdit, this.onDelete});
+  const _UserCard({required this.user, this.onEdit, this.onDelete, this.onToggleActive});
 
   @override
   Widget build(BuildContext context) {
@@ -407,38 +451,55 @@ class _UserCard extends StatelessWidget {
           ),
           const Spacer(),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-                if (onEdit != null)
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    minSize: 0,
-                    onPressed: onEdit,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(CupertinoIcons.pencil, color: colorScheme.primary, size: 20),
-                        const SizedBox(width: 4),
-                        Text(l10n.commonEdit, style: TextStyle(color: colorScheme.primary, fontSize: 14))
-                      ],
-                    ),
+              // 在職開關
+              if (onToggleActive != null) ...[
+                CupertinoSwitch(
+                  value: user['is_active'] as bool? ?? true,
+                  onChanged: onToggleActive,
+                  activeTrackColor: const Color(0xFF34C759),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  (user['is_active'] as bool? ?? true) ? '在職' : '停職',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: (user['is_active'] as bool? ?? true) ? const Color(0xFF34C759) : colorScheme.onSurface.withOpacity(0.4),
                   ),
-                if (onDelete != null) ...[
-                  const SizedBox(width: 16),
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    minSize: 0,
-                    onPressed: onDelete,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(CupertinoIcons.trash, color: colorScheme.error, size: 20),
-                        const SizedBox(width: 4),
-                        Text(l10n.commonDelete, style: TextStyle(color: colorScheme.error, fontSize: 14))
-                      ],
-                    ),
+                ),
+              ],
+              const Spacer(),
+              if (onEdit != null)
+                CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  minSize: 0,
+                  onPressed: onEdit,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(CupertinoIcons.pencil, color: colorScheme.primary, size: 20),
+                      const SizedBox(width: 4),
+                      Text(l10n.commonEdit, style: TextStyle(color: colorScheme.primary, fontSize: 14)),
+                    ],
                   ),
-                ]
+                ),
+              if (onDelete != null) ...[
+                const SizedBox(width: 16),
+                CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  minSize: 0,
+                  onPressed: onDelete,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(CupertinoIcons.trash, color: colorScheme.error, size: 20),
+                      const SizedBox(width: 4),
+                      Text(l10n.commonDelete, style: TextStyle(color: colorScheme.error, fontSize: 14)),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ],
@@ -502,9 +563,11 @@ class _AddUserDialogState extends State<_AddUserDialog> {
           .eq('shop_id', widget.shopId)
           .order('is_system_default', ascending: false)
           .order('created_at');
-      
-      final data = List<Map<String, dynamic>>.from(res);
-      
+
+      final data = List<Map<String, dynamic>>.from(res)
+          .where((r) => !(r['name'] as String).toLowerCase().contains('admin'))
+          .toList();
+
       if (mounted) {
         setState(() {
           roles = data;
@@ -674,15 +737,18 @@ class _AddUserDialogState extends State<_AddUserDialog> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
     final tabs = ['基本', '人事', '薪資', '緊急'];
-    
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding, vertical: 40),
       child: Container(
         decoration: BoxDecoration(
-          color: theme.scaffoldBackgroundColor, 
-          borderRadius: BorderRadius.circular(25), 
+          color: theme.scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(25),
         ),
         child: Column(
           children: [
@@ -869,9 +935,11 @@ class _EditUserDialogState extends State<_EditUserDialog> {
           .select('id, name')
           .eq('shop_id', widget.shopId)
           .order('is_system_default', ascending: false);
-      
-      final data = List<Map<String, dynamic>>.from(res);
-      
+
+      final data = List<Map<String, dynamic>>.from(res)
+          .where((r) => !(r['name'] as String).toLowerCase().contains('admin'))
+          .toList();
+
       final currentRoleId = widget.user['role_id'];
       final current = data.firstWhere((r) => r['id'] == currentRoleId, orElse: () => data.first);
 
@@ -1043,15 +1111,18 @@ class _EditUserDialogState extends State<_EditUserDialog> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
     final tabs = ['基本', '人事', '薪資', '緊急'];
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding, vertical: 40),
       child: Container(
         decoration: BoxDecoration(
-          color: theme.scaffoldBackgroundColor, 
-          borderRadius: BorderRadius.circular(25), 
+          color: theme.scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(25),
         ),
         child: Column(
           children: [
@@ -1167,16 +1238,19 @@ class _DeleteUserDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         height: 183,
         decoration: BoxDecoration(
-          color: theme.cardColor, 
-          borderRadius: BorderRadius.circular(25), 
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(25),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,

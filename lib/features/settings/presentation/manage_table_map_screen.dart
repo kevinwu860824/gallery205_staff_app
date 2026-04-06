@@ -22,18 +22,22 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
   List<String> allAreas = [];
   List<Map<String, dynamic>> tables = [];
   List<String> availableTableNames = [];
-  
+
   bool isEditing = false;
-  
+
   // 拖曳相關變數
   Offset? _dragStartOffset;
-  Offset? _widgetStartOffset;
+  Offset? _widgetStartOffset; // 儲存拖曳開始時的螢幕渲染位置
   Offset? verticalGuideLine;
   Offset? horizontalGuideLine;
-  
+
   final double widgetWidth = 90;
   final double widgetHeight = 60;
   final double headerHeight = 140.0; // 預留頂部 Header 高度
+
+  // 參考裝置尺寸（iPhone 14 Pro）
+  static const double phoneCanvasWidth = 393.0;
+  static const double phoneCanvasHeight = 852.0;
 
   @override
   void initState() {
@@ -41,7 +45,7 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
     _loadAreas();
   }
 
-  // --- 資料讀取邏輯 (保持原樣，僅微調 UI 觸發) ---
+  // --- 資料讀取邏輯 ---
   Future<void> _loadAreas() async {
     final prefs = await SharedPreferences.getInstance();
     final shopId = prefs.getString('savedShopId');
@@ -51,7 +55,7 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
         .from('table_area')
         .select('area_id')
         .eq('shop_id', shopId)
-        .order('sort_order', ascending: true); // 確保區域順序一致
+        .order('sort_order', ascending: true);
 
     final areas = List<String>.from(result.map((e) => e['area_id']));
     setState(() {
@@ -74,7 +78,7 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
         .select('table_name')
         .eq('shop_id', shopId)
         .eq('area_id', selectedArea)
-        .filter('shape', 'is', null) // 只找還沒設定形狀(未放在圖上)的
+        .filter('shape', 'is', null)
         .order('table_name');
 
     setState(() {
@@ -128,13 +132,13 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
     final shopId = prefs.getString('savedShopId');
     if (shopId == null) return;
 
-    // 預設放在螢幕中間偏上
+    // 以參考座標系置中（iPhone 14 Pro 的中間偏上）
     await Supabase.instance.client
         .from('tables')
         .update({
           'area_id': selectedArea,
           'shape': shape,
-          'x': MediaQuery.of(context).size.width / 2 - 30,
+          'x': phoneCanvasWidth / 2 - 30,
           'y': headerHeight + 50,
           'rotation': 0,
         })
@@ -219,20 +223,28 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
 
   // --- UI 建構 ---
 
-  // 建構單個桌子 Widget
-  Widget _buildTableWidget(Map<String, dynamic> table, int index) {
+  /// 建構單個桌子 Widget
+  /// [canvasLeft]：iPad 時 canvas 左側偏移（手機為 0）
+  /// [scaleX]/[scaleY]：參考座標 → 螢幕座標的縮放比例（iPad 為 1.0）
+  Widget _buildTableWidget(
+    Map<String, dynamic> table,
+    int index, {
+    double canvasLeft = 0.0,
+    double canvasTop = 0.0,
+    double scaleX = 1.0,
+    double scaleY = 1.0,
+  }) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final shape = table['shape'];
     final name = table['table_name'];
     if (shape == null) return const SizedBox.shrink();
-    
+
     final double size = 60;
     Widget shapeWidget;
 
-    // 桌子樣式統一
     final TextStyle textStyle = TextStyle(
-      color: colorScheme.onPrimary, 
+      color: colorScheme.onPrimary,
       fontWeight: FontWeight.bold,
       fontSize: 14,
     );
@@ -284,31 +296,38 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
         shapeWidget = Container();
     }
 
+    // 將參考座標轉換為螢幕渲染座標
+    final double refX = (table['x'] as num?)?.toDouble() ?? 0.0;
+    final double refY = (table['y'] as num?)?.toDouble() ?? 0.0;
+    final double renderX = canvasLeft + refX * scaleX;
+    final double renderY = canvasTop + (refY - headerHeight) * scaleY;
+
     return Positioned(
-      left: ((table['x'] as num?)?.toDouble() ?? 0.0).clamp(0.0, double.infinity),
-      top: ((table['y'] as num?)?.toDouble() ?? 0.0).clamp(0.0, double.infinity),
+      left: renderX.clamp(0.0, double.infinity),
+      top: renderY.clamp(0.0, double.infinity),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           GestureDetector(
             onLongPressStart: (details) {
               _dragStartOffset = details.globalPosition;
-              _widgetStartOffset = Offset(
-                (table['x'] as num?)?.toDouble() ?? 0,
-                (table['y'] as num?)?.toDouble() ?? 0,
-              );
+              // 儲存拖曳開始時的螢幕渲染位置
+              _widgetStartOffset = Offset(renderX, renderY);
             },
             onLongPressMoveUpdate: (details) {
               if (_dragStartOffset != null && _widgetStartOffset != null) {
                 final dx = details.globalPosition.dx - _dragStartOffset!.dx;
                 final dy = details.globalPosition.dy - _dragStartOffset!.dy;
+                // 計算新的螢幕位置，再轉換回參考座標儲存
+                final newScreenX = _widgetStartOffset!.dx + dx;
+                final newScreenY = _widgetStartOffset!.dy + dy;
+                final newRefX = (newScreenX - canvasLeft) / scaleX;
+                final newRefY = headerHeight + (newScreenY - canvasTop) / scaleY;
                 setState(() {
-                  tables[index]['x'] = _widgetStartOffset!.dx + dx;
-                  tables[index]['y'] = _widgetStartOffset!.dy + dy;
+                  tables[index]['x'] = newRefX;
+                  tables[index]['y'] = newRefY;
                 });
-                
-                // 輔助線邏輯
-                _checkAlignment(index, dx, dy);
+                _checkAlignment(index, newRefX, newRefY);
               }
             },
             onLongPressEnd: (_) async {
@@ -359,45 +378,56 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
     );
   }
 
-  // 輔助線檢查
-  void _checkAlignment(int index, double dx, double dy) {
-     for (int i = 0; i < tables.length; i++) {
-        if (i == index) continue;
-        final bx = _widgetStartOffset!.dx + dx; 
-        final by = _widgetStartOffset!.dy + dy;
-        final tx = (tables[i]['x'] as num).toDouble();
-        final ty = (tables[i]['y'] as num).toDouble();
+  /// 輔助線檢查（使用參考座標）
+  void _checkAlignment(int index, double refX, double refY) {
+    for (int i = 0; i < tables.length; i++) {
+      if (i == index) continue;
+      final tx = (tables[i]['x'] as num).toDouble();
+      final ty = (tables[i]['y'] as num).toDouble();
 
-        if ((bx - tx).abs() < 5.0) {
-          setState(() => verticalGuideLine = Offset(bx + widgetWidth / 2, 0));
-        } else {
-           setState(() => verticalGuideLine = null);
-        }
-
-        if ((by - ty).abs() < 5.0) {
-          setState(() => horizontalGuideLine = Offset(0, by + widgetHeight / 2));
-        } else {
-          setState(() => horizontalGuideLine = null);
-        }
+      if ((refX - tx).abs() < 5.0) {
+        setState(() => verticalGuideLine = Offset(refX + widgetWidth / 2, 0));
+      } else {
+        setState(() => verticalGuideLine = null);
       }
+
+      if ((refY - ty).abs() < 5.0) {
+        setState(() => horizontalGuideLine = Offset(0, refY + widgetHeight / 2));
+      } else {
+        setState(() => horizontalGuideLine = null);
+      }
+    }
   }
 
-  // 拖曳結束處理 (包含邊界檢查)
+  /// 拖曳結束處理：在參考座標系內做邊界限制，再存回資料庫
   Future<void> _handleDragEnd(int index, String? shape, double size) async {
     final mediaQuery = MediaQuery.of(context);
     final screenWidth = mediaQuery.size.width;
     final screenHeight = mediaQuery.size.height;
     final safeBottom = mediaQuery.padding.bottom;
+    final bool isTablet = mediaQuery.size.shortestSide >= 600;
+
+    // 計算縮放比例
+    final double scaleX = isTablet ? 1.0 : screenWidth / phoneCanvasWidth;
+    final double availableHeight = screenHeight - safeBottom - headerHeight;
+    final double canvasDisplayHeight = (phoneCanvasHeight - headerHeight).clamp(0.0, screenHeight - headerHeight - safeBottom);
+    final double scaleY = isTablet
+        ? canvasDisplayHeight / (phoneCanvasHeight - headerHeight)
+        : availableHeight / (phoneCanvasHeight - headerHeight);
 
     final double wWidth = shape == 'rectangle' ? size + 30 : size;
     final double wHeight = size;
 
-    double x = tables[index]['x'];
-    double y = tables[index]['y'];
+    // 轉換為參考座標系的 widget 尺寸，計算邊界
+    final double refWWidth = wWidth / scaleX;
+    final double refWHeight = wHeight / scaleY;
 
-    // 限制在螢幕範圍內 (扣除 Header)
-    x = x.clamp(0.0, screenWidth - wWidth);
-    y = y.clamp(headerHeight, screenHeight - safeBottom - wHeight);
+    double x = (tables[index]['x'] as num).toDouble();
+    double y = (tables[index]['y'] as num).toDouble();
+
+    // 在參考座標系內限制範圍
+    x = x.clamp(0.0, phoneCanvasWidth - refWWidth);
+    y = y.clamp(headerHeight, phoneCanvasHeight - refWHeight);
 
     setState(() {
       tables[index]['x'] = x;
@@ -416,34 +446,89 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+
+    // iPad：canvas 置中，尺寸固定為參考裝置大小（1:1）
+    // 手機：canvas 佔全寬，依比例縮放座標
+    final double canvasLeft = isTablet ? (screenWidth - phoneCanvasWidth) / 2 : 0.0;
+    final double canvasTop = headerHeight - 50.0; // 整體往上移 50px
+    final double availableHeight = screenHeight - safeBottom - headerHeight;
+    // canvas 區域從 header 底部開始，高度 = 852-140 = 712，若螢幕不夠高則自動縮減
+    final double canvasDisplayHeight = (phoneCanvasHeight - headerHeight).clamp(0.0, screenHeight - headerHeight - safeBottom);
+    final double scaleX = isTablet ? 1.0 : screenWidth / phoneCanvasWidth;
+    final double scaleY = isTablet
+        ? canvasDisplayHeight / (phoneCanvasHeight - headerHeight)
+        : availableHeight / (phoneCanvasHeight - headerHeight);
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // 1. 桌位區域 (保持不變)
+          // 1. 桌位區域
           SizedBox(
             width: double.infinity,
             height: double.infinity,
             child: Stack(
               children: [
-                ...tables.asMap().entries.map((e) => _buildTableWidget(e.value, e.key)),
-                
-                // 輔助線
+                // iPad：顯示固定尺寸的手機顯示範圍框（393 × 712）
+                if (isTablet)
+                  Positioned(
+                    left: canvasLeft,
+                    top: canvasTop,
+                    width: phoneCanvasWidth,
+                    height: canvasDisplayHeight,
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: colorScheme.onSurface.withValues(alpha: 0.2),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              '手機顯示範圍',
+                              style: TextStyle(
+                                color: colorScheme.onSurface.withValues(alpha: 0.3),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                ...tables.asMap().entries.map((e) => _buildTableWidget(
+                  e.value,
+                  e.key,
+                  canvasLeft: canvasLeft,
+                  canvasTop: canvasTop,
+                  scaleX: scaleX,
+                  scaleY: scaleY,
+                )),
+
+                // 輔助線（參考座標轉換為螢幕座標後渲染）
                 if (verticalGuideLine != null)
                   Positioned(
-                    left: verticalGuideLine!.dx,
-                    top: headerHeight, // 這裡使用變數即可
+                    left: canvasLeft + verticalGuideLine!.dx * scaleX,
+                    top: canvasTop,
                     bottom: 0,
                     child: Container(width: 1, color: Colors.grey),
                   ),
                 if (horizontalGuideLine != null)
                   Positioned(
-                    top: horizontalGuideLine!.dy,
-                    left: 0,
-                    right: 0,
+                    top: canvasTop + (horizontalGuideLine!.dy - headerHeight) * scaleY,
+                    left: canvasLeft,
+                    width: isTablet ? phoneCanvasWidth : null,
+                    right: isTablet ? null : 0,
                     child: Container(height: 1, color: Colors.grey),
                   ),
               ],
@@ -456,11 +541,10 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
             left: 0,
             right: 0,
             child: Container(
-              
               color: theme.scaffoldBackgroundColor,
               padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
               child: Column(
-                mainAxisSize: MainAxisSize.min, // ✅ 新增這一行：讓 Column 只佔用最小所需高度
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
@@ -472,12 +556,13 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
                           child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
                           onPressed: () => context.pop(),
                         ),
-                        Expanded(
-                          child: Center(
-                            child: Theme(
-                              data: theme.copyWith(
-                                canvasColor: theme.cardColor,
-                              ),
+                        const Spacer(),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 區域下拉選單
+                            Theme(
+                              data: theme.copyWith(canvasColor: theme.cardColor),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   value: selectedArea.isNotEmpty ? selectedArea : null,
@@ -496,17 +581,12 @@ class _ManageTableMapScreenState extends State<ManageTableMapScreen> {
                                   },
                                   items: allAreas.map((area) => DropdownMenuItem(
                                     value: area,
-                                    // 修正翻譯：將區域名稱與後綴結合
                                     child: Text('$area${l10n.tableMapAreaSuffix}'),
                                   )).toList(),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
+                            const SizedBox(width: 8),
                             // 編輯按鈕
                             CupertinoButton(
                               padding: EdgeInsets.zero,
@@ -561,10 +641,12 @@ class _AddTableDialogState extends State<_AddTableDialog> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -575,7 +657,7 @@ class _AddTableDialogState extends State<_AddTableDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              l10n.tableMapAddDialogTitle, 
+              l10n.tableMapAddDialogTitle,
               style: TextStyle(
                 color: colorScheme.onSurface,
                 fontSize: 20,
@@ -583,26 +665,26 @@ class _AddTableDialogState extends State<_AddTableDialog> {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // 形狀選擇
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _ShapeButton(
-                  icon: Icons.circle, 
-                  label: l10n.tableMapShapeCircle, 
+                  icon: Icons.circle,
+                  label: l10n.tableMapShapeCircle,
                   isSelected: selectedShape == 'circle',
                   onTap: () => setState(() => selectedShape = 'circle'),
                 ),
                 _ShapeButton(
-                  icon: Icons.square, 
-                  label: l10n.tableMapShapeSquare, 
+                  icon: Icons.square,
+                  label: l10n.tableMapShapeSquare,
                   isSelected: selectedShape == 'square',
                   onTap: () => setState(() => selectedShape = 'square'),
                 ),
                 _ShapeButton(
-                  icon: Icons.rectangle, 
-                  label: l10n.tableMapShapeRect, 
+                  icon: Icons.rectangle,
+                  label: l10n.tableMapShapeRect,
                   isSelected: selectedShape == 'rectangle',
                   onTap: () => setState(() => selectedShape = 'rectangle'),
                 ),
@@ -615,13 +697,13 @@ class _AddTableDialogState extends State<_AddTableDialog> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: theme.scaffoldBackgroundColor, // 對比色
+                  color: theme.scaffoldBackgroundColor,
                   borderRadius: BorderRadius.circular(25),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     isExpanded: true,
-                    hint: Text(l10n.tableMapAddDialogHint, style: const TextStyle(color: Colors.grey)), 
+                    hint: Text(l10n.tableMapAddDialogHint, style: const TextStyle(color: Colors.grey)),
                     value: selectedName,
                     icon: Icon(Icons.arrow_drop_down, color: colorScheme.onSurface),
                     dropdownColor: theme.cardColor,
@@ -636,30 +718,29 @@ class _AddTableDialogState extends State<_AddTableDialog> {
             else
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(l10n.tableMapNoAvailableTables, style: const TextStyle(color: Colors.grey)), 
+                child: Text(l10n.tableMapNoAvailableTables, style: const TextStyle(color: Colors.grey)),
               ),
 
             const SizedBox(height: 24),
-            
+
             // 按鈕
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _DialogWhiteButton(
-                  text: l10n.commonCancel, 
+                  text: l10n.commonCancel,
                   onPressed: () => Navigator.of(context).pop(null),
                   buttonColor: theme.cardColor,
                   textColor: colorScheme.onSurface,
                 ),
                 const SizedBox(width: 20),
                 _DialogWhiteButton(
-                  text: l10n.commonAdd, 
-                  // 沒選桌號不能新增
-                  onPressed: selectedName != null 
+                  text: l10n.commonAdd,
+                  onPressed: selectedName != null
                     ? () => Navigator.of(context).pop({'shape': selectedShape, 'name': selectedName!})
-                    : null, 
-                  buttonColor: colorScheme.primary, // 使用 primary color
-                  textColor: colorScheme.onPrimary, // 使用 onPrimary
+                    : null,
+                  buttonColor: colorScheme.primary,
+                  textColor: colorScheme.onPrimary,
                 ),
               ],
             ),
@@ -743,10 +824,12 @@ class _ConfirmDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -764,11 +847,11 @@ class _ConfirmDialog extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _DialogWhiteButton(
-                   text: l10n.commonCancel, 
+                   text: l10n.commonCancel,
                    onPressed: () => Navigator.of(context).pop(false),
                    buttonColor: theme.cardColor,
                    textColor: colorScheme.onSurface,
-                ), 
+                ),
                 const SizedBox(width: 20),
                 _DialogWhiteButton(
                   text: confirmText,

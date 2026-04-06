@@ -56,6 +56,7 @@ class _ViewPrepScreenState extends State<ViewPrepScreen> {
         .from('stock_categories')
         .select('id, name')
         .eq('shop_id', shopId)
+        .eq('is_hidden', false)
         .order('sort_order', ascending: true);
 
     setState(() {
@@ -79,7 +80,9 @@ class _ViewPrepScreenState extends State<ViewPrepScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -103,7 +106,7 @@ class _ViewPrepScreenState extends State<ViewPrepScreen> {
       body: isLoading
           ? const Center(child: CupertinoActivityIndicator())
           : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
               children: [
                 // 卡片內容
                 Container(
@@ -175,7 +178,8 @@ class _ItemSelectionScreenState extends State<ItemSelectionScreen> {
         .from('stock_items')
         .select('id, title, details, created_at')
         .eq('category_id', widget.categoryId)
-        .eq('shop_id', shopId) 
+        .eq('shop_id', shopId)
+        .eq('is_hidden', false)
         .order('sort_order', ascending: true);
 
     setState(() {
@@ -193,7 +197,9 @@ class _ItemSelectionScreenState extends State<ItemSelectionScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -217,7 +223,7 @@ class _ItemSelectionScreenState extends State<ItemSelectionScreen> {
       body: isLoading
           ? const Center(child: CupertinoActivityIndicator())
           : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
               children: [
                 // 卡片內容
                 Container(
@@ -452,7 +458,10 @@ class _ViewItemDetailScreenState extends State<ViewItemDetailScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       // ... appBar ...
       appBar: AppBar(
@@ -465,7 +474,7 @@ class _ViewItemDetailScreenState extends State<ViewItemDetailScreen> {
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // ✅ Reduced top vertical padding from 20 to 10
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
           children: [
              // ✅ Total Quantity Row
              if (mainDetails.isNotEmpty) ...[

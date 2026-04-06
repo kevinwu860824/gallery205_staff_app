@@ -86,6 +86,10 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('庫存管理'),
@@ -110,7 +114,7 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
                   itemCount: _items.length,
                   itemBuilder: (context, index) {
                     final item = _items[index];

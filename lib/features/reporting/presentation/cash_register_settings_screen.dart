@@ -314,9 +314,9 @@ class _CashRegisterSettingsScreenState extends State<CashRegisterSettingsScreen>
     }
 
     // 確定本地化貨幣格式
-    final currencyFormat = NumberFormat('#,###', Localizations.localeOf(context).toString()); 
-    // Figma 寬度: 393px, Group 25 寬度: 281px. 左右 padding: (393 - 281) / 2 = 56px
-    const double horizontalPadding = 56.0;
+    final currencyFormat = NumberFormat('#,###', Localizations.localeOf(context).toString());
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double horizontalPadding = isTablet ? (MediaQuery.of(context).size.width - 600) / 2 : 56.0;
     
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor, 

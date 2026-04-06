@@ -262,9 +262,13 @@ class _AddTaskDialogState extends State<AddTaskDialog> {
         borderRadius: BorderRadius.circular(10)
     );
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

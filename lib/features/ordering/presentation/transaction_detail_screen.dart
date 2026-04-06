@@ -18,6 +18,7 @@ import 'package:gallery205_staff_app/features/ordering/domain/repositories/order
 import 'package:gallery205_staff_app/features/ordering/domain/repositories/session_repository.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/models/table_model.dart'; // Needed for TableStatus
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 class TransactionDetailScreen extends ConsumerStatefulWidget {
   final String orderGroupId;
@@ -113,7 +114,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
          bool isDeleted = false;
          DateTime? deleteTime;
          
-         if (item['status'] == 'cancelled') {
+         if (item['status'] == OrderingConstants.orderStatusCancelled) {
              // Individual cancellation
              isDeleted = true;
              if (item['updated_at'] != null) {
@@ -349,7 +350,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
         for (var itemMap in batchItems) {
             // Check if deletion record
             final isDeletion = itemMap['_is_deletion_record'] == true;
-            final status = isDeletion ? 'cancelled' : (itemMap['status'] ?? 'submitted');
+            final status = isDeletion ? OrderingConstants.orderStatusCancelled : (itemMap['status'] ?? OrderingConstants.itemStatusSubmitted);
             
             items.add(OrderItem(
               id: itemMap['id'] ?? '',
@@ -509,7 +510,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       final newGroupRes = await supabase.from('order_groups').insert({
         'table_names': [selectedTable],
         'pax': originalPax,
-        'status': 'dining', // Active
+        'status': OrderingConstants.orderStatusDining, // Active
         'shop_id': shopId,
         'open_id': openId,
         'note': orderData!['note'] // Copy note too
@@ -520,17 +521,19 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
       // B. Copy Items
       final List<Map<String, dynamic>> itemsToInsert = [];
       for(var item in items) {
-         if (item['status'] == 'cancelled') continue; // Don't copy cancelled items
+         if (item['status'] == OrderingConstants.orderStatusCancelled) continue; // Don't copy cancelled items
          
          itemsToInsert.add({
            'order_group_id': newGroupId,
            'item_name': item['item_name'],
+           'item_id': item['item_id'],
            'price': item['price'],
            'quantity': item['quantity'],
            'status': 'submitted', // Reset status
            'modifiers': item['modifiers'] ?? item['selected_modifiers'],
            'note': item['note'],
            'target_print_category_ids': item['target_print_category_ids'],
+           'print_status': 'success', // Skip printing for copied items
          });
       }
       
@@ -687,27 +690,28 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
     
     // Attempt to find a 'seq' or order number. Usually passed in or calculated.
     // Using ID snippet for now if not provided.
-    final String displayId = widget.transactionId != '-' ? widget.transactionId : (hasData ? orderData!['id'].toString().substring(0,8) : '-');
     final String invoice = orderData?['invoice_number'] ?? '-';
-    final String pickupNum = orderData?['pickup_number']?.toString() ?? '1';
     
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("交易紀錄詳情"),
-        backgroundColor: theme.cardColor,
+        backgroundColor: theme.scaffoldBackgroundColor,
         leading: IconButton(
           icon: const Icon(CupertinoIcons.back),
           onPressed: () => context.pop(),
         ),
       ),
-      body: isLoading 
-          ? const Center(child: CupertinoActivityIndicator()) 
+      body: isLoading
+          ? const Center(child: CupertinoActivityIndicator())
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               child: Column(
                 children: [
                    // 1. Info Card
@@ -723,8 +727,8 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                        children: [
                          _buildInfoRow(context, "營業日期：", dateStr),
                          _buildInfoRow(context, "交易日期：", timeStr),
-                         _buildInfoRow(context, "領餐號：", pickupNum),
-                         _buildInfoRow(context, "交易編號：", displayId),
+                         _buildInfoRow(context, "交易編號：", orderData?['pickup_number']?.toString() ?? '-'),
+                         _buildInfoRow(context, "人數：", orderData?['pax']?.toString() ?? '-'),
                          _buildInfoRow(context, "統一發票：", invoice),
                          if (orderData?['staff_name'] != null)
                              _buildInfoRow(context, "經手人員：", orderData!['staff_name']),
@@ -748,9 +752,9 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                const SizedBox(width: 16),
                                  Expanded(
                                    child: Opacity(
-                                     opacity: (orderData?['status'] == 'cancelled') ? 0.5 : 1.0,
+                                     opacity: (orderData?['status'] == OrderingConstants.orderStatusCancelled) ? 0.5 : 1.0,
                                      child: OutlinedButton.icon(
-                                       onPressed: (orderData?['status'] == 'cancelled') ? null : _processVoid,
+                                       onPressed: (orderData?['status'] == OrderingConstants.orderStatusCancelled) ? null : _processVoid,
                                        style: OutlinedButton.styleFrom(
                                          padding: const EdgeInsets.symmetric(vertical: 16),
                                          side: BorderSide(color: theme.dividerColor),
@@ -814,7 +818,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                 itemBuilder: (context, index) {
                                   final item = batchItems[index];
                                   final bool isDeletion = item['_is_deletion_record'] == true;
-                                  final bool isCancelled = item['status'] == 'cancelled';
+                                  final bool isCancelled = item['status'] == OrderingConstants.orderStatusCancelled;
                                   
                                   // Resolve Station Names
                                   List<String> targetIds = List<String>.from(item['target_print_category_ids'] ?? []);
@@ -927,7 +931,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
 
                    // 3. Print Actions (Completed OR Cancelled)
                    // 3. New Collapsible Sections for Completed Orders
-                   if (['completed', 'cancelled'].contains(orderData?['status'])) ...[
+                   if ([OrderingConstants.orderStatusCompleted, OrderingConstants.orderStatusCancelled].contains(orderData?['status'])) ...[
                       // 3.1 Customer Detail (顧客明細)
                       Container(
                         margin: const EdgeInsets.only(top: 16, bottom: 16),
@@ -951,7 +955,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                   itemCount: items.length,
                                   itemBuilder: (context, index) {
                                      final item = items[index];
-                                     if (item['status'] == 'cancelled') return const SizedBox.shrink();
+                                     if (item['status'] == OrderingConstants.orderStatusCancelled) return const SizedBox.shrink();
                                      // Only show valid items? User said "Customer Detail" -> Receipt.
                                      // Receipt usually shows everything or just valid? Usually valid.
                                      
@@ -1028,7 +1032,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                         return const SizedBox.shrink();
                                      }),
                                       // Retry invoice Logic (Only if tax rate is 5.0)
-                                      if (orderData?['status'] == 'completed' && orderData?['ezpay_invoice_number'] == null && (orderData?['tax_snapshot']?['rate'] as num?)?.toDouble() == 5.0) ...[
+                                      if (orderData?['status'] == OrderingConstants.orderStatusCompleted && orderData?['ezpay_invoice_number'] == null && (orderData?['tax_snapshot']?['rate'] as num?)?.toDouble() == 5.0) ...[
                                         const SizedBox(height: 12),
                                         SizedBox(
                                           width: double.infinity,
@@ -1038,7 +1042,7 @@ class _TransactionDetailScreenState extends ConsumerState<TransactionDetailScree
                                             label: const Text("補開電子發票"),
                                             style: FilledButton.styleFrom(
                                               padding: const EdgeInsets.all(16),
-                                              backgroundColor: Colors.orange.shade700,
+                                              backgroundColor: Theme.of(context).colorScheme.primary,
                                             ),
                                           ),
                                         ),

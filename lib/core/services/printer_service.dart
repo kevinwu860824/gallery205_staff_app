@@ -22,13 +22,15 @@ class PrinterService {
   final LocalDbService _localDb = LocalDbService();
 
   /// 執行智慧分單列印 (一般點餐)
-  /// Returns list of item IDs that FAILED to print.
-  Future<List<String>> processOrderPrinting(
-    OrderContext context, 
+  /// Returns Map<printerIp, Set<failedItemId>>
+  /// [targetPrinterIps]: 若有指定，只送這些 IP（補印用）；null = 送全部
+  Future<Map<String, Set<String>>> processOrderPrinting(
+    OrderContext context,
     List<Map<String, dynamic>> printerSettings,
     List<Map<String, dynamic>> allPrintCategories,
-    int orderSequenceNumber, 
-  ) async {
+    int orderSequenceNumber, {
+    Set<String>? targetPrinterIps,
+  }) async {
     return await _coreProcessPrinting(
       context: context,
       itemsToPrint: context.order.items,
@@ -36,6 +38,7 @@ class PrinterService {
       allPrintCategories: allPrintCategories,
       orderSequenceNumber: orderSequenceNumber,
       isDeletion: false,
+      targetPrinterIps: targetPrinterIps,
     );
   }
 
@@ -60,7 +63,7 @@ class PrinterService {
       note: deletedItem.note,
     );
 
-    return await _coreProcessPrinting(
+    final resultMap = await _coreProcessPrinting(
       context: context,
       itemsToPrint: [itemCopy],
       printerSettings: printerSettings,
@@ -68,21 +71,27 @@ class PrinterService {
       orderSequenceNumber: orderSequenceNumber,
       isDeletion: true,
     );
+    // Flatten all failed item IDs from all printers
+    final Set<String> allFailed = {};
+    for (final ids in resultMap.values) {
+      allFailed.addAll(ids);
+    }
+    return allFailed.toList();
   }
 
-  // 共用核心邏輯
-  Future<List<String>> _coreProcessPrinting({
+  // 共用核心邏輯 — 平行列印 + 重試，回傳 Map<printerIp, Set<failedItemId>>
+  Future<Map<String, Set<String>>> _coreProcessPrinting({
     required OrderContext context,
     required List<OrderItem> itemsToPrint,
     required List<Map<String, dynamic>> printerSettings,
     required List<Map<String, dynamic>> allPrintCategories,
     required int orderSequenceNumber,
     required bool isDeletion,
+    Set<String>? targetPrinterIps,
   }) async {
-    final Set<String> failedItemIds = {};
-
     // 1. Group items by Station ID
-    Map<String, List<OrderItem>> itemsByStation = {};
+    final Map<String, List<OrderItem>> itemsByStation = {};
+    final Map<String, Set<String>> noprinterFailed = {}; // ip="" placeholder
     for (var item in itemsToPrint) {
       if (item.targetPrintCategoryIds.isEmpty) {
         debugPrint("品項 ${item.itemName} 未指定工作站，略過");
@@ -94,63 +103,122 @@ class PrinterService {
     }
 
     // 2. Assign Stations to Printers
-    Map<String, Set<String>> tasksByPrinterIp = {}; // IP -> Set<StationId>
+    final Map<String, Set<String>> tasksByPrinterIp = {}; // IP -> Set<StationId>
     for (var stationId in itemsByStation.keys) {
-      var targetPrinters = printerSettings.where((p) {
-        List<String> assigned = List<String>.from(p['assigned_print_category_ids'] ?? []);
+      final targetPrinters = printerSettings.where((p) {
+        final List<String> assigned = List<String>.from(p['assigned_print_category_ids'] ?? []);
         return assigned.contains(stationId);
       }).toList();
 
       if (targetPrinters.isEmpty) {
         debugPrint("警告: 工作站 ID $stationId 沒有分配給任何印表機");
-        // No printer = Failed
         final items = itemsByStation[stationId] ?? [];
-        failedItemIds.addAll(items.map((e) => e.id));
+        noprinterFailed.putIfAbsent('', () => {}).addAll(items.map((e) => e.id));
         continue;
       }
 
       for (var printer in targetPrinters) {
         final ip = printer['ip'];
-        if (ip != null && ip.isNotEmpty) {
+        if (ip != null && (ip as String).isNotEmpty) {
           tasksByPrinterIp.putIfAbsent(ip, () => {}).add(stationId);
         }
       }
     }
 
-    // 3. Execute Printing
-    for (var entry in tasksByPrinterIp.entries) {
+    // 3. Execute Printing in parallel with retry
+    final Map<String, Set<String>> resultMap = {};
+    if (noprinterFailed.isNotEmpty) {
+      resultMap.addAll(noprinterFailed);
+    }
+
+    // 若指定了 targetPrinterIps，只送那幾台（補印用）
+    final entries = targetPrinterIps != null
+        ? tasksByPrinterIp.entries.where((e) => targetPrinterIps.contains(e.key))
+        : tasksByPrinterIp.entries;
+
+    await Future.wait(entries.map((entry) async {
       final ip = entry.key;
       final stationIds = entry.value.toList();
-      
+
       final printerConfig = printerSettings.firstWhere(
-        (p) => p['ip'] == ip, 
-        orElse: () => <String, dynamic>{}
+        (p) => p['ip'] == ip,
+        orElse: () => <String, dynamic>{},
       );
       final int paperWidth = printerConfig['paper_width_mm'] ?? 80;
+      final bool buzzerEnabled = printerConfig['buzzer_enabled'] ?? false;
 
-      debugPrint("正在發送至 $ip ($paperWidth mm)，包含工作站: $stationIds (刪除單: $isDeletion)");
-      
-      try {
-        await _createAndExecuteSmartTask(
-          context, 
-          ip, 
-          stationIds, 
-          itemsByStation, 
-          allPrintCategories,
-          orderSequenceNumber,
-          isDeletion,
-          paperWidth,
-        );
-      } catch (e) {
-         // Mark items as failed
-         for (var sid in stationIds) {
-            final items = itemsByStation[sid] ?? [];
-            failedItemIds.addAll(items.map((i) => i.id));
-         }
+      const int maxAttempts = 3;
+      const Duration retryDelay = Duration(milliseconds: 1500);
+      bool success = false;
+
+      for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          debugPrint("發送至 $ip ($paperWidth mm) 第 $attempt 次，工作站: $stationIds");
+          await _createAndExecuteSmartTask(
+            context,
+            ip,
+            stationIds,
+            itemsByStation,
+            allPrintCategories,
+            orderSequenceNumber,
+            isDeletion,
+            paperWidth,
+            buzzerEnabled,
+          ).timeout(const Duration(seconds: 15));
+          success = true;
+          break;
+        } catch (e) {
+          debugPrint("$ip 第 $attempt 次失敗: $e");
+          if (attempt < maxAttempts) {
+            await Future.delayed(retryDelay);
+          }
+        }
       }
-    }
-    
-    return failedItemIds.toList();
+
+      if (!success) {
+        // 嘗試備援印表機（fallback_printer_id）
+        final fallbackId = printerConfig['fallback_printer_id'] as String?;
+        if (fallbackId != null && fallbackId.isNotEmpty) {
+          final fallbackConfig = printerSettings.firstWhere(
+            (p) => p['id'] == fallbackId,
+            orElse: () => <String, dynamic>{},
+          );
+          final fallbackIp = fallbackConfig['ip'] as String?;
+          if (fallbackIp != null && fallbackIp.isNotEmpty) {
+            final int fallbackPaperWidth = fallbackConfig['paper_width_mm'] ?? 80;
+            final bool fallbackBuzzer = fallbackConfig['buzzer_enabled'] ?? false;
+            try {
+              debugPrint('🔄 主印表機 $ip 失敗，切換備援 $fallbackIp');
+              await _createAndExecuteSmartTask(
+                context,
+                fallbackIp,
+                stationIds,
+                itemsByStation,
+                allPrintCategories,
+                orderSequenceNumber,
+                isDeletion,
+                fallbackPaperWidth,
+                fallbackBuzzer,
+              ).timeout(const Duration(seconds: 15));
+              success = true;
+              debugPrint('✅ 備援印表機 $fallbackIp 列印成功');
+            } catch (e) {
+              debugPrint('❌ 備援印表機 $fallbackIp 也失敗: $e');
+            }
+          }
+        }
+      }
+
+      if (!success) {
+        final Set<String> failedIds = {};
+        for (var sid in stationIds) {
+          failedIds.addAll((itemsByStation[sid] ?? []).map((i) => i.id));
+        }
+        resultMap[ip] = failedIds;
+      }
+    }));
+
+    return resultMap;
   }
 
   Future<void> _createAndExecuteSmartTask(
@@ -161,7 +229,8 @@ class PrinterService {
     List<Map<String, dynamic>> allPrintCategories,
     int orderSequenceNumber,
     bool isDeletion,
-    int paperWidth, // New Arg
+    int paperWidth,
+    bool buzzerEnabled,
   ) async {
     final taskId = const Uuid().v4();
     final now = DateTime.now();
@@ -180,7 +249,7 @@ class PrinterService {
       final profile = await CapabilityProfile.load();
       final printer = NetworkPrinter(paper, profile);
 
-      final result = await printer.connect(ip, port: 9100);
+      final result = await printer.connect(ip, port: 9100, timeout: const Duration(seconds: 8));
       if (result != PosPrintResult.success) {
         throw Exception("無法連線至印表機 $ip");
       }
@@ -209,6 +278,10 @@ class PrinterService {
         }
       }
 
+      if (buzzerEnabled) {
+        // ESC/POS buzzer: ESC B n t1 t2 (3 beeps, 200ms on, 200ms off)
+        printer.rawBytes(Uint8List.fromList([0x1B, 0x42, 0x03, 0x02, 0x02]));
+      }
       printer.disconnect();
       await _localDb.updatePrintTaskStatus(taskId, 'success');
     } catch (e) {
@@ -1341,8 +1414,9 @@ class PrinterService {
     _drawText(canvas, "＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝", startX, y, proofWidth, styleFooter);
     y += 30;
 
-    // Tax Breakdown for B2B (Assumes 5% tax included in price)
-    int salesAmount = (finalTotalAmt / 1.05).round();
+    // Tax Breakdown for B2B (reads rate from tax_snapshot, defaults to 5%)
+    final double taxRate = ((order.taxSnapshot?['rate'] as num?)?.toDouble() ?? 5.0) / 100;
+    int salesAmount = (finalTotalAmt / (1 + taxRate)).floor();
     int taxAmount = finalTotalAmt - salesAmount;
 
     _drawSummaryRow(canvas, "銷售額", "\$$salesAmount", startX, y, proofWidth, 0, styleFooter, styleFooter);

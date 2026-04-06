@@ -38,8 +38,6 @@ class SettingsScreen extends ConsumerWidget {
        );
     }
 
-    final double kMinHeight =
-        kToolbarHeight + MediaQuery.of(context).padding.top;
 
     // ==========================================================
     // 建立選項列表 (分類邏輯)
@@ -118,8 +116,20 @@ class SettingsScreen extends ConsumerWidget {
         },
       ]);
     }
+    if (permissionHelper.hasPermission(AppPermissions.setCostCat)) {
+      menuInvOptions.add({
+        'icon': CupertinoIcons.tag,
+        'label': l10n.costCategoryTitle,
+        'route': '/manageCostCategories',
+      });
+    }
 
     // --- 3. 設備與桌位配置 ---
+    equipTableOptions.add({
+      'icon': CupertinoIcons.antenna_radiowaves_left_right,
+      'label': 'Hub 設定',
+      'route': '/hubSettings',
+    });
     if (permissionHelper.hasPermission(AppPermissions.setPrinter)) {
       equipTableOptions.add({
         'icon': CupertinoIcons.printer,
@@ -160,11 +170,6 @@ class SettingsScreen extends ConsumerWidget {
         'icon': CupertinoIcons.percent,
         'label': l10n.settingTax,
         'route': '/taxSettings',
-      });
-      equipTableOptions.add({
-        'icon': CupertinoIcons.tag,
-        'label': l10n.costCategoryTitle,
-        'route': '/manageCostCategories',
       });
     }
 
@@ -231,6 +236,13 @@ class SettingsScreen extends ConsumerWidget {
     // UI 建構
     // ==========================================================
 
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final isTablet = shortestSide >= 600;
+    final double hPadding = isTablet
+        ? (MediaQuery.of(context).size.width - 600) / 2
+        : 16.0;
+
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
@@ -248,68 +260,33 @@ class SettingsScreen extends ConsumerWidget {
               ),
               centerTitle: false,
               flexibleSpace: FlexibleSpaceBar(
-                background: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Theme.of(context).scaffoldBackgroundColor.withOpacity(0.0),
-                        Theme.of(context).scaffoldBackgroundColor,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: const [0.5, 1.0],
+                // --- A. 大標題放在 background，不受 scale 影響 ---
+                background: Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Theme.of(context).scaffoldBackgroundColor.withOpacity(0.0),
+                            Theme.of(context).scaffoldBackgroundColor,
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.5, 1.0],
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                titlePadding: EdgeInsets.zero,
-                title: LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints constraints) {
-                    final double currentHeight = constraints.maxHeight;
-                    final bool isSnapped = currentHeight <= (kMinHeight + 50);
-
-                    return Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        // --- A. 大標題 (靠左) ---
-                        AnimatedOpacity(
-                          duration: const Duration(milliseconds: 150),
-                          opacity: isSnapped ? 0.0 : 1.0,
-                          child: Align(
-                            alignment: Alignment.bottomLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.only(
-                                  left: 16.0, bottom: 16.0),
-                              child: Text(
-                                l10n.settingsTitle, 
-                                style: AppTextStyles.settingsPageTitle.copyWith(
-                                  color: colorScheme.onSurface,
-                                ),
-                              ),
-                            ),
-                          ),
+                    Positioned(
+                      left: hPadding,
+                      bottom: 16,
+                      child: Text(
+                        l10n.settingsTitle,
+                        style: AppTextStyles.settingsPageTitle.copyWith(
+                          color: colorScheme.onSurface,
                         ),
-
-                        // --- B. 小標題 (置中) ---
-                        AnimatedOpacity(
-                          duration: const Duration(milliseconds: 150),
-                          opacity: isSnapped ? 1.0 : 0.0,
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 16.0),
-                              child: Text(
-                                l10n.settingsTitle, 
-                                style: AppTextStyles.settingsListItem.copyWith(
-                                  color: colorScheme.onSurface,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -317,7 +294,7 @@ class SettingsScreen extends ConsumerWidget {
             // 使用者名稱卡片
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16.0, 0, 16.0, 18.0),
+                padding: EdgeInsets.fromLTRB(hPadding, 0, hPadding, 18.0),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 66, vertical: 32),
@@ -327,9 +304,9 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   child: Center(
                     child: Text(
-                      userName, 
+                      userName,
                       style: AppTextStyles.settingsUserDisplayName.copyWith(
-                        color: colorScheme.onSurface, // Changed to dynamic
+                        color: colorScheme.onSurface,
                       ),
                     ),
                   ),
@@ -340,7 +317,7 @@ class SettingsScreen extends ConsumerWidget {
             // 分類列表 (標準清單樣式)
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8.0),
                 child: Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,

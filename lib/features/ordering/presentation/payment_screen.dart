@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:gallery205_staff_app/core/services/hub_client.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gallery205_staff_app/features/auth/presentation/providers/auth_providers.dart'; // NEW
@@ -15,16 +18,23 @@ import 'package:gallery205_staff_app/features/ordering/domain/entities/order_gro
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/services.dart'; // NEW
 import 'package:dropdown_button2/dropdown_button2.dart'; // NEW
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 
 class PaymentScreen extends ConsumerStatefulWidget {
   final String groupKey;
   final double totalAmount;
+  final bool embedded;
+  final VoidCallback? onClose;
+  final VoidCallback? onPaymentComplete;
 
   const PaymentScreen({
-    super.key, 
+    super.key,
     required this.groupKey,
     required this.totalAmount,
+    this.embedded = false,
+    this.onClose,
+    this.onPaymentComplete,
   });
 
   @override
@@ -269,7 +279,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         final itemsRes = await supabase.from('order_items')
             .select()
             .eq('order_group_id', widget.groupKey)
-            .neq('status', 'cancelled');
+            .neq('status', OrderingConstants.orderStatusCancelled);
         
         _itemDetails = List<Map<String, dynamic>>.from(itemsRes);
         _taxProfile = taxProfile;
@@ -494,52 +504,54 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         // Proceed without open_id (User requested to not block)
       }
 
-      // 1. Insert Payments
+      // REFINED TAX CALCULATION
+      final int finalAmtInt = _totalAmount.toInt();
+      final int calculatedAmt = (finalAmtInt / 1.05).floor();
+      final int calculatedTax = finalAmtInt - calculatedAmt;
+
+      // 0.5 ~ 2. Supabase 結帳寫入（Hub 離線時 fallback 存本地）
+      bool savedToHubOffline = false;
       try {
+        // 0.5. Hub 模式：結帳前先同步訂單到 Supabase
+        if (HubClient().isHubAvailable) {
+          await _syncPendingOrderToSupabase(supabase);
+        }
+
+        // 1. Insert Payments
         for (var p in payments) {
           await supabase.from('order_payments').insert({
             'order_group_id': widget.groupKey,
             'payment_method': p['method'],
             'amount': p['amount'],
             'reference': (p['ref'] as String).isEmpty ? null : p['ref'],
-            'open_id': openId, // Link to shift
+            'open_id': openId,
           });
         }
-      } catch (e) {
-        throw "儲存付款紀錄失敗: $e";
-      }
-      
-      // Calculate Tax Amount (Re-calculate mostly for event)
-      // Ideally we should have stored it?
-      // Re-fetch logic or use what we computed in _loadOrderDetails?
-      // I forgot to store taxAmount as state in _loadOrderDetails.
-      // I should modify _loadOrderDetails to store taxAmount in a class variable.
-      
-      // REFINED TAX CALCULATION (Sync with Edge Function)
-      final int finalAmtInt = _totalAmount.toInt();
-      final int calculatedAmt = (finalAmtInt / 1.05).round();
-      final int calculatedTax = finalAmtInt - calculatedAmt;
 
-      // 2. Update Order Group Status
-      try {
+        // 2. Update Order Group Status
         final ubn = ubnController.text.trim();
         final carrierNum = carrierNumController.text.trim();
-
         await supabase.from('order_groups').update({
-          'status': 'completed',
+          'status': OrderingConstants.orderStatusCompleted,
           'checkout_time': DateTime.now().toUtc().toIso8601String(),
-          'payment_method': payments.map((p) => p['method']).toSet().join(','), 
+          'payment_method': payments.map((p) => p['method']).toSet().join(','),
           'final_amount': _totalAmount,
           'service_fee_rate': isServiceFeeEnabled ? serviceFeeRate : 0,
           'discount_amount': manualDiscount,
-          'open_id': openId, // Link to shift
+          'open_id': openId,
           'buyer_ubn': ubn.isNotEmpty ? ubn : null,
-          'carrier_type': carrierNum.isNotEmpty ? '0' : null, // Force '0' for mobile barcode
+          'carrier_type': carrierNum.isNotEmpty ? '0' : null,
           'carrier_num': carrierNum.isNotEmpty ? carrierNum : null,
         }).eq('id', widget.groupKey);
-
       } catch (e) {
-        throw "更新訂單狀態失敗: $e";
+        // Supabase 不可用時，若 Hub 在線則存本地，稍後同步
+        if (HubClient().isHubAvailable) {
+          debugPrint('⚠️ Supabase unavailable, saving checkout to Hub: $e');
+          await _saveCheckoutToHub(openId);
+          savedToHubOffline = true;
+        } else {
+          throw "結帳失敗（無法連線至伺服器）: $e";
+        }
       }
       
       // 3. Fire Payment Completed Event (for other listeners if any)
@@ -553,7 +565,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
       // 3.5. Issue Invoice (Synchronous/Blocking) if Tax is 5%
       String? invoiceError;
-      if (_taxProfile != null && _taxProfile!.rate == 5.0) {
+      if (!savedToHubOffline && _taxProfile != null && _taxProfile!.rate == 5.0) {
         bool isResolved = false;
         while (!isResolved) {
           invoiceError = await ref.read(invoiceServiceProvider).onPaymentCompleted(event);
@@ -609,7 +621,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       }
 
       // 3.6. Print Invoice Proof (if issued)
-      if (_taxProfile != null && _taxProfile!.rate == 5.0 && invoiceError == null) {
+      if (!savedToHubOffline && _taxProfile != null && _taxProfile!.rate == 5.0 && invoiceError == null) {
         try {
           final updatedGroup = await supabase.from('order_groups').select().eq('id', widget.groupKey).single();
           final printerService = PrinterService();
@@ -679,6 +691,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       }
 
       // 4. Print Receipt (Sync or Semi-sync)
+      bool receiptPrintFailed = false;
       try {
         final printerService = PrinterService();
         final allSettings = await supabase.from('printer_settings').select().eq('shop_id', shopId!);
@@ -729,14 +742,45 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         ).timeout(const Duration(seconds: 10), onTimeout: () => 0);
       } catch (e) {
         debugPrint("Payment Print Error (Safe caught): $e");
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("收據列印失敗 (可稍後補印): $e")));
+        receiptPrintFailed = true;
+      }
+
+      // 追蹤未完成列印（Scenario A / B1 / B2）
+      final bool needsInvoice = !savedToHubOffline
+          && (_taxProfile?.rate == 5.0)
+          && (invoiceError != null);
+      if (savedToHubOffline || receiptPrintFailed || needsInvoice) {
+        try {
+          await ref.read(orderingRepositoryProvider).addPendingReceiptPrint({
+            'id': widget.groupKey,
+            'table_names': jsonEncode(_tableNames),
+            'final_amount': _totalAmount,
+            'checkout_time': DateTime.now().toIso8601String(),
+            'needs_invoice': (savedToHubOffline && (_taxProfile?.rate == 5.0)) || needsInvoice ? 1 : 0,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+        } catch (trackErr) {
+          debugPrint('⚠️ addPendingReceiptPrint failed: $trackErr');
+        }
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("結帳完成 🎉")));
-        // Safety: ensure we pop even if snackbar is still showing
+        String msg;
+        if (savedToHubOffline) {
+          msg = '結帳已暫存，連線後自動同步 📥';
+        } else if (receiptPrintFailed) {
+          msg = '結帳完成，但收據列印失敗，可至補印區補印 🖨️';
+        } else {
+          msg = '結帳完成 🎉';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) Navigator.of(context).pop(true);
+          if (!mounted) return;
+          if (widget.onPaymentComplete != null) {
+            widget.onPaymentComplete!();
+          } else {
+            Navigator.of(context).pop(true);
+          }
         });
       }
     } catch (e) {
@@ -749,33 +793,117 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
 
 
 
-  @override
-  Widget build(BuildContext context) {
+  /// Hub 模式：將 Hub 本地 SQLite 的訂單資料同步到 Supabase
+  /// 在結帳寫入 order_payments / 更新 order_groups 之前呼叫，確保 FK 存在
+  Future<void> _syncPendingOrderToSupabase(SupabaseClient supabase) async {
+    final data = await HubClient().get('/orders/${widget.groupKey}');
+    if (data == null) throw '無法從主機取得訂單資料，請確認主機連線正常';
+
+    final group = data['order_group'] as Map<String, dynamic>?;
+    final rawItems = data['order_items'] as List?;
+    if (group == null) throw '主機回傳訂單資料格式錯誤';
+
+    // 解析 table_names（Hub 以 JSON string 儲存，Supabase 需要 List<String>）
+    List<String> tableNames = [];
+    final rawTableNames = group['table_names'];
+    if (rawTableNames is String) {
+      tableNames = List<String>.from(jsonDecode(rawTableNames) as List);
+    } else if (rawTableNames is List) {
+      tableNames = List<String>.from(rawTableNames);
+    }
+
+    // 解析 tax_snapshot（Hub 以 JSON string 儲存，Supabase 需要 Map）
+    Map<String, dynamic>? taxSnapshot;
+    final rawTax = group['tax_snapshot'];
+    if (rawTax is String && rawTax.isNotEmpty) {
+      taxSnapshot = jsonDecode(rawTax) as Map<String, dynamic>;
+    } else if (rawTax is Map) {
+      taxSnapshot = Map<String, dynamic>.from(rawTax);
+    }
+
+    // Upsert order_group（含 id，確保冪等）
+    await supabase.from('order_groups').upsert({
+      'id': group['id'],
+      'shop_id': group['shop_id'],
+      'table_names': tableNames,
+      'pax_adult': group['pax_adult'] ?? 0,
+      'staff_name': group['staff_name'],
+      'tax_snapshot': taxSnapshot,
+      'color_index': group['color_index'] ?? 0,
+      'created_at': group['created_at'],
+      'status': OrderingConstants.orderStatusDining,
+    });
+
+    // Upsert order_items（欄位名稱已對齊 Supabase，只需 jsonDecode）
+    if (rawItems != null && rawItems.isNotEmpty) {
+      for (final raw in rawItems.cast<Map<String, dynamic>>()) {
+        // modifiers：JSON string → List
+        List<dynamic> modifiers = [];
+        final rawMod = raw['modifiers'];
+        if (rawMod is String && rawMod.isNotEmpty) {
+          modifiers = jsonDecode(rawMod) as List;
+        }
+
+        // target_print_category_ids：JSON string → List<String>
+        List<String> printCatIds = [];
+        final rawCat = raw['target_print_category_ids'];
+        if (rawCat is String && rawCat.isNotEmpty) {
+          printCatIds = List<String>.from(jsonDecode(rawCat) as List);
+        } else if (rawCat is List) {
+          printCatIds = List<String>.from(rawCat);
+        }
+
+        await supabase.from('order_items').upsert({
+          'id': raw['id'],
+          'order_group_id': raw['order_group_id'],
+          'item_id': raw['item_id'],
+          'item_name': raw['item_name'],
+          'quantity': raw['quantity'],
+          'price': raw['price'],
+          'modifiers': modifiers,
+          'note': raw['note'] ?? '',
+          'target_print_category_ids': printCatIds,
+          'created_at': raw['created_at'],
+          'status': raw['status'] ?? 'new',
+        });
+      }
+    }
+
+    debugPrint('✅ Hub order synced to Supabase: ${widget.groupKey}');
+  }
+
+  /// Hub 離線結帳：將結帳資料存入 Hub 本地 pending_checkouts，稍後由 syncOfflineOrders 同步
+  Future<void> _saveCheckoutToHub(String? openId) async {
+    final ubn = ubnController.text.trim();
+    final carrierNum = carrierNumController.text.trim();
+    await HubClient().post('/checkout', {
+      'checkout': {
+        'id': const Uuid().v4(),
+        'order_group_id': widget.groupKey,
+        'payment_method': payments.map((p) => p['method']).toSet().join(','),
+        'final_amount': _totalAmount,
+        'discount_amount': manualDiscount,
+        'service_fee_rate': isServiceFeeEnabled ? serviceFeeRate.toDouble() : 0.0,
+        'buyer_ubn': ubn.isNotEmpty ? ubn : null,
+        'carrier_num': carrierNum.isNotEmpty ? carrierNum : null,
+        'carrier_type': carrierNum.isNotEmpty ? '0' : null,
+        'checkout_time': DateTime.now().toIso8601String(),
+        'payments_json': jsonEncode(payments),
+        'open_id': openId,
+        'is_synced': 0,
+      },
+      'table_name': _tableNames.isNotEmpty ? _tableNames.first : null,
+    });
+    debugPrint('📥 Checkout saved to Hub offline: ${widget.groupKey}');
+  }
+
+  Widget _buildBody(BuildContext context) {
     final remaining = _remaining;
     final isComplete = remaining <= 0;
-    final showCreditCardInput = selectedMethod?.toLowerCase().contains('credit') == true || 
+    final showCreditCardInput = selectedMethod?.toLowerCase().contains('credit') == true ||
                                 selectedMethod?.toLowerCase().contains('card') == true ||
                                 selectedMethod?.contains('信用卡') == true;
-
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text("選擇付款方式", style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(CupertinoIcons.printer_fill),
-            onPressed: isLoading ? null : _reprintBill,
-            tooltip: "補印結帳確認單",
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-
-      extendBodyBehindAppBar: true,
-      body: GestureDetector(
+    return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => FocusScope.of(context).unfocus(),
         child: LayoutBuilder(
@@ -790,7 +918,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight + 24),
+                          SizedBox(height: widget.embedded ? 8 : MediaQuery.of(context).padding.top + kToolbarHeight + 24),
                           // 1. Top Summary
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
@@ -1182,12 +1310,72 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
             );
           }
         ),
-      ),
     );
-    }
-    
-    bool get activeInput => _remaining > 0;
   }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.embedded) {
+      return Column(
+        children: [
+          // Embedded header: printer + title + close
+          SafeArea(
+            bottom: false,
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(CupertinoIcons.printer_fill, color: Theme.of(context).colorScheme.onSurface),
+                    onPressed: isLoading ? null : _reprintBill,
+                    tooltip: "補印結帳確認單",
+                  ),
+                  Expanded(
+                    child: Text(
+                      "結帳",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(CupertinoIcons.xmark, color: Theme.of(context).colorScheme.onSurface),
+                    onPressed: () => widget.onClose?.call(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(child: _buildBody(context)),
+        ],
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text("選擇付款方式", style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(CupertinoIcons.printer_fill),
+            onPressed: isLoading ? null : _reprintBill,
+            tooltip: "補印結帳確認單",
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      extendBodyBehindAppBar: true,
+      body: _buildBody(context),
+    );
+  }
+
+  bool get activeInput => _remaining > 0;
+}
 
 class _CarrierScannerOverlay extends StatefulWidget {
   @override

@@ -20,6 +20,8 @@ class _CustomTile extends StatelessWidget {
   final VoidCallback? onEdit;
   final bool isEditing;
   final int? reorderIndex;
+  final bool isVisible;
+  final ValueChanged<bool>? onToggle;
 
   const _CustomTile({
     required this.title,
@@ -28,6 +30,8 @@ class _CustomTile extends StatelessWidget {
     this.onDelete,
     this.onEdit,
     this.reorderIndex,
+    this.isVisible = true,
+    this.onToggle,
     super.key,
   });
 
@@ -35,7 +39,7 @@ class _CustomTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+
     if (isEditing) {
       // 編輯模式
       return Container(
@@ -43,19 +47,17 @@ class _CustomTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: [
-            // 刪除按鈕
             CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.minus_circle, color: CupertinoColors.systemRed),
               onPressed: onDelete,
+              child: const Icon(CupertinoIcons.minus_circle, color: CupertinoColors.systemRed),
             ),
             const SizedBox(width: 10),
-            // 名稱 (點擊編輯)
             Expanded(
               child: CupertinoButton(
                 padding: EdgeInsets.zero,
                 alignment: Alignment.centerLeft,
-                onPressed: onEdit, 
+                onPressed: onEdit,
                 child: Text(
                   title,
                   textAlign: TextAlign.left,
@@ -63,10 +65,9 @@ class _CustomTile extends StatelessWidget {
                 ),
               ),
             ),
-            // 排序手柄
-            if (reorderIndex != null) // 僅在需要排序時顯示
+            if (reorderIndex != null)
               ReorderableDragStartListener(
-                index: reorderIndex!, 
+                index: reorderIndex!,
                 child: Padding(
                   padding: const EdgeInsets.only(left: 6),
                   child: Icon(CupertinoIcons.bars, color: colorScheme.onSurface),
@@ -77,15 +78,34 @@ class _CustomTile extends StatelessWidget {
       );
     } else {
       // 正常模式
-      return CupertinoButton(
-        padding: const EdgeInsets.symmetric(horizontal: 22.0, vertical: 16.0),
-        onPressed: onTap, // 正常模式點擊是進入下一頁
+      return Container(
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              title,
-              style: TextStyle(color: colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500),
+            Expanded(
+              child: CupertinoButton(
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                onPressed: onTap,
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: isVisible ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.5),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            Transform.scale(
+              scale: 0.8,
+              child: CupertinoSwitch(
+                value: isVisible,
+                onChanged: onToggle,
+                activeTrackColor: colorScheme.primary,
+              ),
             ),
             Icon(CupertinoIcons.chevron_right, color: colorScheme.onSurface, size: 20),
           ],
@@ -107,10 +127,13 @@ class _DeleteDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         height: 183, 
@@ -238,6 +261,23 @@ class _StockCategoryDetailScreenState extends State<StockCategoryDetailScreen> {
     }
   }
 
+  Future<void> _toggleItemHidden(String id, bool currentIsHidden) async {
+    try {
+      await Supabase.instance.client
+          .from('stock_items')
+          .update({'is_hidden': !currentIsHidden})
+          .eq('id', id);
+      setState(() {
+        final index = items.indexWhere((e) => e['id'] == id);
+        if (index != -1) {
+          items[index] = {...items[index], 'is_hidden': !currentIsHidden};
+        }
+      });
+    } catch (e) {
+      debugPrint('Toggle hidden error: $e');
+    }
+  }
+
   void _goToEditItem({Map<String, dynamic>? item}) {
     context.push(
       '/addStockItem', // 導航到 AddStockItemScreen
@@ -255,9 +295,12 @@ class _StockCategoryDetailScreenState extends State<StockCategoryDetailScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor, 
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
@@ -286,7 +329,7 @@ class _StockCategoryDetailScreenState extends State<StockCategoryDetailScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
         children: [
           Container(
             decoration: BoxDecoration(
@@ -340,10 +383,12 @@ class _StockCategoryDetailScreenState extends State<StockCategoryDetailScreen> {
                           final item = items[index];
                           return Column(
                             children: [
-                              _CustomTile( 
+                              _CustomTile(
                                 title: item['title'] ?? 'N/A',
                                 isEditing: false,
                                 onTap: () => _goToEditItem(item: item),
+                                isVisible: !(item['is_hidden'] ?? false),
+                                onToggle: (_) => _toggleItemHidden(item['id'], item['is_hidden'] ?? false),
                               ),
                               if (index < items.length - 1)
                                 Padding( 

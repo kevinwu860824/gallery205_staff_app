@@ -394,6 +394,9 @@ class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProvid
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     final displayTasks = _onlyMyTasks
         ? tasks.where((t) {
             final ids = t['assignee_ids'] as List<dynamic>? ?? [];
@@ -406,7 +409,7 @@ class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProvid
         // 只有 "未完成" 頁籤才需要 "只看我的" 篩選，還是都要？
         // 假設都要
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -445,7 +448,7 @@ class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProvid
               : displayTasks.isEmpty
               ? Center(child: Text(status == 'pending' ? l10n.todoEmptyPending : l10n.todoEmptyIncomplete, style: TextStyle(color: colorScheme.onSurfaceVariant))) 
               : ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
             itemCount: displayTasks.length,
             itemBuilder: (_, index) => _buildTaskCard(displayTasks[index], status: status),
           ),
@@ -458,6 +461,9 @@ class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProvid
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     return Column(
       children: [
         Padding(
@@ -492,7 +498,7 @@ class _TodoListScreenState extends State<TodoListScreen> with SingleTickerProvid
               : _completedTasks.isEmpty
               ? Center(child: Text(l10n.todoEmptyCompleted, style: TextStyle(color: colorScheme.onSurfaceVariant))) 
               : ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
             itemCount: _completedTasks.length,
             itemBuilder: (_, index) => _buildTaskCard(_completedTasks[index], status: 'completed'),
           ),

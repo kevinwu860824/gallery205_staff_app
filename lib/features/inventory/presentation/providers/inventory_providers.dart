@@ -84,6 +84,20 @@ class InventoryCategoriesNotifier extends AsyncNotifier<List<InventoryCategory>>
      }
   }
 
+  Future<void> updateCategory(String id, String newName) async {
+    final currentList = state.value;
+    if (currentList == null) return;
+    final category = currentList.firstWhere((c) => c.id == id);
+    final updated = InventoryCategory(id: category.id, name: newName, shopId: category.shopId, sortOrder: category.sortOrder);
+    try {
+      final repository = ref.read(inventoryRepositoryProvider);
+      await repository.updateCategory(updated);
+      ref.invalidateSelf();
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
   Future<void> deleteCategory(String id) async {
     // state = const AsyncValue.loading(); // Optional: show loading or optimistic
     try {

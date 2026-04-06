@@ -109,7 +109,10 @@ class _PayrollScreenState extends State<PayrollScreen> {
     // final l10n = AppLocalizations.of(context)!; // Need to add keys later
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     final totalExpense = _report.fold(0.0, (sum, item) => sum + (item.finalWage ?? item.calculatedWage));
     final monthStr = DateFormat('yyyy MMM').format(_selectedMonth);
 
@@ -128,7 +131,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
           // 1. Dashboard Header
           Container(
             padding: const EdgeInsets.all(20),
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            margin: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
             decoration: BoxDecoration(
               color: colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(16),
@@ -176,7 +179,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
             child: _isLoading 
                 ? const Center(child: CupertinoActivityIndicator())
                 : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                     itemCount: _report.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (ctx, index) {

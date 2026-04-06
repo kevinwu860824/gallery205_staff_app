@@ -187,6 +187,10 @@ class _ManageTablesScreenState extends State<ManageTablesScreen> {
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
     final keys = tableData.keys.toList();
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet
+        ? (MediaQuery.of(context).size.width - 600) / 2
+        : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -219,7 +223,7 @@ class _ManageTablesScreenState extends State<ManageTablesScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), 
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
         children: [
           // 區域列表卡片
           Container(
@@ -572,7 +576,9 @@ class _AreaDetailScreenState extends State<AreaDetailScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (MediaQuery.of(context).size.width - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -604,7 +610,7 @@ class _AreaDetailScreenState extends State<AreaDetailScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
         children: [
           Container(
             decoration: BoxDecoration(
@@ -794,10 +800,12 @@ class _AddEditDialogState extends State<_AddEditDialog> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isEditMode = widget.initialName != null;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -862,10 +870,12 @@ class _DeleteDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         height: 183, 

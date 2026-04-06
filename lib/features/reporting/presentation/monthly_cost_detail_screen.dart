@@ -16,7 +16,7 @@ InputDecoration _buildInputDecoration(BuildContext context, {required String hin
     hintText: hintText,
     hintStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 16, fontWeight: FontWeight.w500),
     filled: true,
-    fillColor: theme.cardColor,
+    fillColor: theme.scaffoldBackgroundColor,
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(25),
       borderSide: BorderSide.none,
@@ -167,16 +167,19 @@ class _MonthlyCostDetailScreenState extends State<MonthlyCostDetailScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: _buildHeader(context, l10n.monthlyCostDetailTitle), 
+      appBar: _buildHeader(context, l10n.monthlyCostDetailTitle),
       body: SafeArea(
         child: _isLoading
             ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
             : _monthlyExpenses.isEmpty
-                ? Center(child: Text(l10n.monthlyCostDetailNoRecords, style: TextStyle(color: colorScheme.onSurface))) 
+                ? Center(child: Text(l10n.monthlyCostDetailNoRecords, style: TextStyle(color: colorScheme.onSurface)))
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                     itemCount: _monthlyExpenses.length,
                     itemBuilder: (context, index) {
                       final expense = _monthlyExpenses[index];
@@ -206,13 +209,13 @@ PreferredSizeWidget _buildHeader(BuildContext context, String title, {List<Widge
       color: theme.scaffoldBackgroundColor,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
         child: Row(
           children: [
             CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.zero,
               child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
-              onPressed: () => context.pop(), 
+              onPressed: () => context.pop(),
             ),
             Expanded(
               child: Text(
@@ -444,14 +447,18 @@ class _EditCostDialogState extends State<_EditCostDialog> {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 16,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: theme.cardColor,
           borderRadius: BorderRadius.circular(25),
         ),
-        child: SingleChildScrollView( 
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -534,7 +541,11 @@ class _ConfirmDeleteDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 40,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -625,7 +636,11 @@ class _NoticeDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 40,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -658,18 +673,18 @@ class _WhiteDropdown extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     return Container(
-      height: 54, 
+      height: 54,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: theme.cardColor,
+        color: theme.scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(25),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           // ✅ 防呆：如果 value 不在 items 裡，給 null
-          value: items.contains(value) ? value : null, 
-          hint: Text(value.isEmpty ? l10n.costInputLoadingCategories : value, style: TextStyle(color: colorScheme.onSurface)), 
+          value: items.contains(value) ? value : null,
+          hint: Text(value.isEmpty ? l10n.costInputLoadingCategories : value, style: TextStyle(color: colorScheme.onSurface)),
           isExpanded: true,
           icon: Icon(CupertinoIcons.chevron_down, color: colorScheme.onSurface),
           style: TextStyle(color: colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w500),
@@ -677,7 +692,7 @@ class _WhiteDropdown extends StatelessWidget {
           items: items.map<DropdownMenuItem<String>>((String value) {
             return DropdownMenuItem<String>(value: value, child: Text(value));
           }).toList(),
-          dropdownColor: theme.cardColor,
+          dropdownColor: theme.scaffoldBackgroundColor,
         ),
       ),
     );
@@ -702,7 +717,7 @@ class _WhiteInputButton extends StatelessWidget {
         height: 54, 
         width: double.infinity,
         decoration: BoxDecoration(
-          color: theme.cardColor,
+          color: theme.scaffoldBackgroundColor,
           borderRadius: BorderRadius.circular(25),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 20),

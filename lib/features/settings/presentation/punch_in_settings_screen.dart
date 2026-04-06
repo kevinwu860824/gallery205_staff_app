@@ -271,6 +271,9 @@ class _PunchInSettingsScreenState extends State<PunchInSettingsScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor, 
@@ -294,7 +297,7 @@ class _PunchInSettingsScreenState extends State<PunchInSettingsScreen> {
       body: Stack(
         children: [
           SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

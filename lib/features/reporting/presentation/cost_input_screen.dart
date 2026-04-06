@@ -309,20 +309,24 @@ class _CostInputScreenState extends State<CostInputScreen> {
     // -------------------------------------------------
     // 狀態二：已開帳
     // -------------------------------------------------
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: _buildHeader(context, l10n.costInputTitle, actions: [ 
-        CupertinoButton( 
+      appBar: _buildHeader(context, l10n.costInputTitle, actions: [
+        CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Icon(CupertinoIcons.list_bullet, color: colorScheme.onSurface, size: 30),
           onPressed: _viewDetails,
+          child: Icon(CupertinoIcons.list_bullet, color: colorScheme.onSurface, size: 30),
         ),
       ]),
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16.0),
           child: Form(
             key: _formKey,
             child: Column(
@@ -420,13 +424,13 @@ PreferredSizeWidget _buildHeader(BuildContext context, String title, {List<Widge
       color: theme.scaffoldBackgroundColor,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
         child: Row(
           children: [
             CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.zero,
+              onPressed: () => context.pop(),
               child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
-              onPressed: () => context.pop(), 
             ),
             Expanded(
               child: Text(
@@ -525,9 +529,12 @@ class _NoticeDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

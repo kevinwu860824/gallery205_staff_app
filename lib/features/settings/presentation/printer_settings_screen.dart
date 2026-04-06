@@ -79,11 +79,14 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final controller = TextEditingController(text: category?['name'] ?? '');
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
 
     await showDialog(
       context: context,
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
@@ -137,17 +140,23 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   Future<void> _deletePrintCategory(String id) async {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: theme.cardColor,
-        title: Text("刪除工作站", style: TextStyle(color: colorScheme.onSurface)),
-        content: const Text("確定要刪除此工作站嗎？相關的菜單設定可能會失效。", style: TextStyle(color: Colors.grey)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text("取消", style: TextStyle(color: colorScheme.onSurface))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text("刪除", style: TextStyle(color: colorScheme.error))),
-        ],
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
+        child: AlertDialog(
+          backgroundColor: theme.cardColor,
+          title: Text("刪除工作站", style: TextStyle(color: colorScheme.onSurface)),
+          content: const Text("確定要刪除此工作站嗎？相關的菜單設定可能會失效。", style: TextStyle(color: Colors.grey)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text("取消", style: TextStyle(color: colorScheme.onSurface))),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: Text("刪除", style: TextStyle(color: colorScheme.error))),
+          ],
+        ),
       ),
     );
 
@@ -166,7 +175,9 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final String printerName = printer['name'];
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 20.0;
+
     List<String> assignedIds = List<String>.from(printer['assigned_print_category_ids'] ?? []);
 
     await showDialog(
@@ -174,7 +185,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+          insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding, vertical: 40),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
@@ -265,17 +276,22 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final printerId = data?['id'];
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     // Default to 80mm
     int paperWidth = data?['paper_width_mm'] ?? 80;
     // Default false
     bool isReceipt = data?['is_receipt_printer'] ?? false;
+    bool buzzerEnabled = data?['buzzer_enabled'] ?? false;
+    String? fallbackPrinterId = data?['fallback_printer_id'] as String?;
 
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => Dialog(
           backgroundColor: Colors.transparent,
+          insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
@@ -314,6 +330,41 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                   activeColor: colorScheme.primary,
                   onChanged: (val) => setDialogState(() => isReceipt = val),
                 ),
+                // Buzzer Toggle
+                SwitchListTile(
+                  title: Text("出單時啟用蜂鳴器", style: TextStyle(color: colorScheme.onSurface)),
+                  value: buzzerEnabled,
+                  activeColor: colorScheme.primary,
+                  onChanged: (val) => setDialogState(() => buzzerEnabled = val),
+                ),
+
+                const SizedBox(height: 12),
+                // Fallback Printer Dropdown
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: theme.scaffoldBackgroundColor,
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  child: DropdownButton<String?>(
+                    value: fallbackPrinterId,
+                    isExpanded: true,
+                    underline: const SizedBox.shrink(),
+                    dropdownColor: theme.cardColor,
+                    style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
+                    hint: const Text("備援印表機（主機失敗時切換）", style: TextStyle(color: Colors.grey)),
+                    items: [
+                      const DropdownMenuItem<String?>(value: null, child: Text("無備援")),
+                      ...printers
+                          .where((p) => p['id'] != printerId)
+                          .map((p) => DropdownMenuItem<String?>(
+                                value: p['id'] as String,
+                                child: Text(p['name'] ?? p['ip'] ?? '未知'),
+                              )),
+                    ],
+                    onChanged: (val) => setDialogState(() => fallbackPrinterId = val),
+                  ),
+                ),
 
                 const SizedBox(height: 30),
                 Row(
@@ -331,18 +382,22 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                           try {
                             if (isEdit) {
                               await Supabase.instance.client.from('printer_settings').update({
-                                'name': name, 
+                                'name': name,
                                 'ip': ip,
                                 'paper_width_mm': paperWidth,
                                 'is_receipt_printer': isReceipt,
+                                'buzzer_enabled': buzzerEnabled,
+                                'fallback_printer_id': fallbackPrinterId,
                               }).eq('id', printerId);
                             } else {
                               await Supabase.instance.client.from('printer_settings').insert({
-                                'shop_id': shopId, 
-                                'name': name, 
+                                'shop_id': shopId,
+                                'name': name,
                                 'ip': ip,
                                 'paper_width_mm': paperWidth,
                                 'is_receipt_printer': isReceipt,
+                                'buzzer_enabled': buzzerEnabled,
+                                'fallback_printer_id': fallbackPrinterId,
                               });
                             }
                             if(mounted) Navigator.pop(context);
@@ -369,17 +424,23 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: theme.cardColor,
-        title: Text(l10n.printerDeleteTitle, style: TextStyle(color: colorScheme.onSurface)),
-        content: const Text("確定要刪除此印表機嗎？", style: TextStyle(color: Colors.grey)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.commonCancel, style: TextStyle(color: colorScheme.onSurface))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.commonDelete, style: TextStyle(color: colorScheme.error))),
-        ],
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
+        child: AlertDialog(
+          backgroundColor: theme.cardColor,
+          title: Text(l10n.printerDeleteTitle, style: TextStyle(color: colorScheme.onSurface)),
+          content: const Text("確定要刪除此印表機嗎？", style: TextStyle(color: Colors.grey)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l10n.commonCancel, style: TextStyle(color: colorScheme.onSurface))),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: Text(l10n.commonDelete, style: TextStyle(color: colorScheme.error))),
+          ],
+        ),
       ),
     );
     if (confirm == true) {
@@ -488,11 +549,15 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     // 顯示負責的區域
     final List<String> assignedIds = List<String>.from(printer['assigned_print_category_ids'] ?? []);
     final assignedNames = printCategories.where((pc) => assignedIds.contains(pc['id'])).map((pc) => pc['name']).join(", ");
+    final String? fallbackId = printer['fallback_printer_id'] as String?;
+    final String? fallbackName = fallbackId != null
+        ? (printers.firstWhere((p) => p['id'] == fallbackId, orElse: () => {})['name'] as String?)
+        : null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16.0),
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
-      height: 140, 
+      height: fallbackName != null ? 160 : 140,
       decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -517,6 +582,12 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
             style: TextStyle(color: assignedNames.isEmpty ? Colors.orange : Colors.blue, fontSize: 13),
             maxLines: 1, overflow: TextOverflow.ellipsis,
           ),
+          if (fallbackName != null)
+            Text(
+              "備援: $fallbackName",
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+            ),
           const Spacer(),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -543,13 +614,15 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (MediaQuery.of(context).size.width - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: Stack(
         children: [
           ListView(
-            padding: EdgeInsets.only(top: safeAreaTop + 140, left: 16, right: 16, bottom: 40),
+            padding: EdgeInsets.only(top: safeAreaTop + 140, left: hPadding, right: hPadding, bottom: 40),
             children: [
               // 1. 出單工作站管理區塊
               _buildPrintCategoryList(),

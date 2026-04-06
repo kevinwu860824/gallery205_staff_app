@@ -57,6 +57,8 @@
   "scheduleTabCustom": "Personalizzato",
   "scheduleFilterTooltip": "Filtra Gruppi",
   "scheduleSelectGroups": "Seleziona Gruppi",
+  "scheduleSelectAll": "Seleziona tutto",
+  "scheduleDeselectAll": "Deseleziona tutto",
   "commonDone": "Fatto",
   "schedulePersonalMe": "Personale (Io)",
   "scheduleUntitled": "Senza Titolo",

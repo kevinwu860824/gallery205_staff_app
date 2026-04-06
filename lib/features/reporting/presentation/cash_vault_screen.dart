@@ -431,6 +431,9 @@ class _CashVaultScreenState extends State<CashVaultScreen> {
     final l10n = AppLocalizations.of(context)!;
     final totalAsset = (_vaultInventory['current_vault_amount'] as num? ?? 0.0).toDouble();
     final vaultOnly = totalAsset - _pettyCashAmount;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -443,7 +446,7 @@ class _CashVaultScreenState extends State<CashVaultScreen> {
               child: _isLoading 
                 ? Center(child: CupertinoActivityIndicator(color: theme.iconTheme.color))
                 : SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                   child: Column(
                     children: [
                       _buildTotalCard(totalAsset),
@@ -480,7 +483,7 @@ class _CashVaultScreenState extends State<CashVaultScreen> {
     final colorScheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context)!;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
       child: Row(
         children: [
           CupertinoButton(
@@ -737,7 +740,11 @@ class _DenominationDialogState extends State<_DenominationDialog> {
     final l10n = AppLocalizations.of(context)!;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(20),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 20,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

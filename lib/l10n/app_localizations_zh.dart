@@ -185,6 +185,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get scheduleSelectGroups => '選擇群組';
 
   @override
+  String get scheduleSelectAll => '全選';
+
+  @override
+  String get scheduleDeselectAll => '全部取消';
+
+  @override
   String get commonDone => '完成';
 
   @override
@@ -1440,7 +1446,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cashFlowMonthlyRevenue => '本月營收';
 
   @override
-  String get cashFlowMonthlyDifference => '本月每日成本';
+  String get cashFlowMonthlyDifference => '本月現金短溢';
 
   @override
   String cashFlowLabelShift(Object count) {
@@ -1981,7 +1987,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get inventoryCategoryTitle => '編輯庫存列表';
 
   @override
-  String get inventoryManagementTitle => 'Inventory Management';
+  String get inventoryManagementTitle => '庫存管理';
 
   @override
   String get inventoryCategoryDetailTitle => '品項列表';
@@ -2891,6 +2897,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get scheduleSelectGroups => '选择群组';
+
+  @override
+  String get scheduleSelectAll => '全选';
+
+  @override
+  String get scheduleDeselectAll => '全部取消';
 
   @override
   String get commonDone => '完成';
@@ -4076,7 +4088,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get cashFlowMonthlyRevenue => '本月营收';
 
   @override
-  String get cashFlowMonthlyDifference => '本月每日成本';
+  String get cashFlowMonthlyDifference => '本月现金短溢';
 
   @override
   String cashFlowLabelShift(Object count) {

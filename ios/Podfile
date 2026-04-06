@@ -32,6 +32,9 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # ML Kit 中文文字辨識模型
+  pod 'GoogleMLKit/TextRecognitionChinese', '~> 7.0.0'
   target 'RunnerTests' do
     inherit! :search_paths
   end

@@ -3,6 +3,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/models/table_model.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 class OrderingRepository {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -47,7 +48,7 @@ class OrderingRepository {
         .from('order_groups')
         .select('id, table_names, color_index')
         .eq('shop_id', shopId)
-        .eq('status', 'dining')
+        .eq('status', OrderingConstants.orderStatusDining)
         .order('created_at', ascending: true); // Sort by time so last one is "current"
 
     // C. 整合狀態 (Mapping)

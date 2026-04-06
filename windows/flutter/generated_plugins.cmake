@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   charset_converter
   cloud_firestore
+  connectivity_plus
   file_selector_windows
   firebase_auth
   firebase_core
@@ -13,6 +14,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   geolocator_windows
   local_auth_windows
   permission_handler_windows
+  sentry_flutter
   url_launcher_windows
 )
 

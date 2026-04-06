@@ -337,14 +337,14 @@ class _ModifierSelectionDialogState extends State<ModifierSelectionDialog> {
             child: SizedBox(
               width: double.infinity,
               child: CupertinoButton(
-                color: Theme.of(context).colorScheme.primary,
+                color: Theme.of(context).colorScheme.surface,
                 onPressed: _confirm,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                     Text("加入購物車", style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontWeight: FontWeight.bold)),
+                     Text("加入購物車", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.bold)),
                      const SizedBox(width: 10),
-                     Text("\$${total.toStringAsFixed(0)}", style: TextStyle(color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.8))),
+                     Text("\$${total.toStringAsFixed(0)}", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8))),
                   ],
                 ),
               ),

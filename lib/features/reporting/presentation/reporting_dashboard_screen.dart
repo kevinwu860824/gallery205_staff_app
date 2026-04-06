@@ -234,6 +234,8 @@ class _ReportingDashboardScreenState extends ConsumerState<ReportingDashboardScr
     }).toList();
 
     final theme = Theme.of(context);
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double outerPadding = isTablet ? 100 : 24;
     // final isDark = theme.brightness == Brightness.dark; // Unused here
 
     return Scaffold(
@@ -290,19 +292,19 @@ class _ReportingDashboardScreenState extends ConsumerState<ReportingDashboardScr
                           children: [
                             LinearProgressIndicator(
                               value: _processTotal > 0 ? _processProgress / _processTotal : 0,
-                              backgroundColor: Colors.orange.shade100,
-                              color: Colors.orange,
+                              backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                             const SizedBox(height: 4),
-                            Text("$_processProgress / $_processTotal", style: const TextStyle(fontSize: 10, color: Colors.orange)),
+                            Text("$_processProgress / $_processTotal", style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.primary)),
                           ],
                         ),
                       )
                     : ElevatedButton(
                         onPressed: _startBatchProcess,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
@@ -313,16 +315,16 @@ class _ReportingDashboardScreenState extends ConsumerState<ReportingDashboardScr
             ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(top: 20, left: 24, right: 24),
-              child: visibleButtons.isEmpty 
+              padding: EdgeInsets.only(top: 20, left: outerPadding, right: outerPadding),
+              child: visibleButtons.isEmpty
                 ? Center(child: Text(l10n.reportingNoAccess, style: TextStyle(color: theme.hintColor)))
                 : GridView.builder(
                     itemCount: visibleButtons.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4, 
-                      crossAxisSpacing: 16, 
-                      mainAxisSpacing: 0, 
-                      childAspectRatio: 0.75, 
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: isTablet ? 6 : 4,
+                      crossAxisSpacing: isTablet ? 15 : 16,
+                      mainAxisSpacing: 0,
+                      childAspectRatio: isTablet ? 1.25 : 0.75,
                     ),
                     itemBuilder: (context, index) {
                       final button = visibleButtons[index];
@@ -356,7 +358,8 @@ class _LiquidGlassIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const double iconSize = 62.0; 
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double iconSize = isTablet ? 60.0 : 62.0;
     final isLight = Theme.of(context).brightness == Brightness.light;
 
     return GestureDetector( 

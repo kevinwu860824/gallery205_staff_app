@@ -229,6 +229,9 @@ class _EditMenuScreenState extends State<EditMenuScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -261,7 +264,7 @@ class _EditMenuScreenState extends State<EditMenuScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), 
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
         children: [
           Container(
             decoration: BoxDecoration(
@@ -752,7 +755,10 @@ class _MenuCategoryDetailScreenState extends State<MenuCategoryDetailScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -784,7 +790,7 @@ class _MenuCategoryDetailScreenState extends State<MenuCategoryDetailScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), 
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
         children: [
           Container(
             decoration: BoxDecoration(
@@ -1109,10 +1115,13 @@ class _AddEditCategoryDialogState extends State<_AddEditCategoryDialog> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isEditMode = widget.isEditing;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
@@ -1205,12 +1214,16 @@ class _DeleteDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
-        height: 183, 
+        height: 183,
         decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1501,11 +1514,15 @@ class _AddEditItemDialogState extends State<_AddEditItemDialog> {
     final colorScheme = theme.colorScheme;
     final isEditMode = widget.isEditing;
     
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return DefaultTabController(
       length: 2,
       child: Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding, vertical: 24),
         child: Container(
           // constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
           decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(25)),

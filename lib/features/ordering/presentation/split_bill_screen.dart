@@ -1,26 +1,37 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../data/repositories/ordering_repository.dart';
+import 'package:gallery205_staff_app/core/services/local_db_service.dart';
+import 'package:gallery205_staff_app/core/services/hub_client.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
+import 'package:gallery205_staff_app/features/ordering/data/repositories/ordering_repository_impl.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/repositories/ordering_repository.dart';
+import 'package:gallery205_staff_app/features/ordering/presentation/providers/ordering_providers.dart';
 
-class SplitBillScreen extends StatefulWidget {
+class SplitBillScreen extends ConsumerStatefulWidget {
   final String groupKey;
   final List<String> currentSeats;
+  final bool embedded;
+  final VoidCallback? onClose;
+  final VoidCallback? onSplitComplete;
 
   const SplitBillScreen({
     super.key,
     required this.groupKey,
     required this.currentSeats,
+    this.embedded = false,
+    this.onClose,
+    this.onSplitComplete,
   });
 
   @override
-  State<SplitBillScreen> createState() => _SplitBillScreenState();
+  ConsumerState<SplitBillScreen> createState() => _SplitBillScreenState();
 }
 
-class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProviderStateMixin {
+class _SplitBillScreenState extends ConsumerState<SplitBillScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final OrderingRepository _repository = OrderingRepository();
   bool isLoading = true;
 
   // Data
@@ -49,68 +60,123 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
   Future<void> _loadData() async {
     setState(() => isLoading = true);
     try {
-      final supabase = Supabase.instance.client;
-      
-      // 1. Fetch all active orders for these tables (to populate dropdown)
-      // This is important because after split, tables have multiple orders.
-      // We assume user wants to switch between any order on these tables.
-      // Note: We use table_names overlap logic or just fetch by Shop + Tables?
-      // Simpler: Fetch all orders where table_names overlap with widget.currentSeats
-      // But query array column is tricky. 
-      // Alternative: Use the OrderingRepository logic or just fetch by IDs if we knew them.
-      // We don't have IDs. 
-      // Let's assume we can fetch by shop_id and filter in memory or use 'cs' operator if available.
-      // Since currentSeats is List<String>, we iterate manually or use RPC.
-      // For now, let's just fetch all 'dining' orders for this shop and filter.
-      // Optimization: Fetch only dining orders, fairly small set.
-      final hostGroup = await supabase.from('order_groups').select('shop_id').eq('id', widget.groupKey).single();
-      final String shopId = hostGroup['shop_id'];
+      final repo = ref.read(orderingRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final bool isHubDevice = prefs.getBool('isHubDevice') ?? false;
+      final String hubIp = prefs.getString('hubIpAddress') ?? '';
+      final bool isHubClient = hubIp.isNotEmpty && !isHubDevice;
 
-      final allDiningRes = await supabase
-          .from('order_groups')
-          .select('id, table_names, created_at, pax, note, color_index')
-          .eq('shop_id', shopId)
-          .eq('status', 'dining')
-          .order('created_at', ascending: true);
-      
-      activeOrders = List<Map<String, dynamic>>.from(allDiningRes).where((order) {
-         final List tables = order['table_names'] ?? [];
-         // Check intersection
-         return tables.any((t) => widget.currentSeats.contains(t));
-      }).toList();
+      // 1. Fetch all related orders for this group (Hub-aware)
+      // Hub mode: directly look up by group ID (no currentSeats filter needed)
+      // Supabase mode: filter all dining orders by currentSeats
+      List<Map<String, dynamic>> allActive = [];
 
-      // Filter out empty ghost orders (e.g. created from failed split attempts)
-      if (activeOrders.length > 1) {
-          final activeGroupIds = activeOrders.map((e) => e['id']).toList();
+      if (isHubDevice) {
+        final db = LocalDbService();
+        final activeByTable = await db.getActiveGroupIdsByTable();
+        // Find tables belonging to widget.groupKey
+        final relatedTables = activeByTable.entries
+            .where((e) => e.value.contains(widget.groupKey))
+            .map((e) => e.key)
+            .toSet();
+        // Collect all group IDs from those tables
+        final relatedGroupIds = <String>{};
+        for (final table in relatedTables) {
+          relatedGroupIds.addAll(activeByTable[table] ?? []);
+        }
+        if (relatedGroupIds.isEmpty) relatedGroupIds.add(widget.groupKey);
+        final allGroups = await db.getAllActivePendingOrderGroupsWithItems();
+        allActive = allGroups
+            .where((o) => relatedGroupIds.contains(o['id'] as String? ?? ''))
+            .toList();
+      } else if (isHubClient) {
+        final hubClient = HubClient();
+        final res = await hubClient.get('/orders/${widget.groupKey}/related');
+        if (res != null && res['orders'] is List) {
+          allActive = List<Map<String, dynamic>>.from(res['orders']);
+        } else {
+          // Fallback: at minimum load the source group
+          allActive = [];
+        }
+      } else {
+        // Supabase path
+        final supabase = Supabase.instance.client;
+        final hostGroup = await supabase
+            .from('order_groups')
+            .select('shop_id')
+            .eq('id', widget.groupKey)
+            .single();
+        final String shopId = hostGroup['shop_id'];
+        final allDiningRes = await supabase
+            .from('order_groups')
+            .select('id, table_names, created_at, pax, note, color_index')
+            .eq('shop_id', shopId)
+            .eq('status', OrderingConstants.orderStatusDining)
+            .order('created_at', ascending: true);
+        allActive = List<Map<String, dynamic>>.from(allDiningRes);
+
+        // Filter Supabase results to orders sharing any of the current seats
+        allActive = allActive.where((order) {
+          final tables = order['table_names'];
+          final List<String> tableList = tables is List
+              ? List<String>.from(tables)
+              : (tables is String && tables.startsWith('[') && tables.length > 2
+                  ? tables.substring(1, tables.length - 1).split(',').map((e) => e.trim().replaceAll('"', '')).toList()
+                  : (tables is String ? [tables] : []));
+          return tableList.any((t) => widget.currentSeats.contains(t));
+        }).toList();
+      }
+
+      activeOrders = allActive;
+
+      // 確保原始訂單（widget.groupKey）始終排在第一位，其他依 created_at ASC
+      activeOrders.sort((a, b) {
+        if (a['id'] == widget.groupKey) return -1;
+        if (b['id'] == widget.groupKey) return 1;
+        final aDate = (a['created_at'] as String? ?? '');
+        final bDate = (b['created_at'] as String? ?? '');
+        return aDate.compareTo(bDate);
+      });
+
+      // Supabase only: filter out ghost orders (zero non-cancelled items)
+      if (!isHubDevice && !isHubClient && activeOrders.length > 1) {
+        try {
+          final supabase = Supabase.instance.client;
+          final activeGroupIds = activeOrders.map((e) => e['id'] as String).toList();
           final validItemsRes = await supabase
               .from('order_items')
               .select('order_group_id')
               .inFilter('order_group_id', activeGroupIds)
-              .neq('status', 'cancelled');
-              
-          final validGroupIds = Set<String>.from(validItemsRes.map((e) => e['order_group_id'].toString()));
-          
-          // Retain orders that have valid items, but ALWAYS keep the entry group (Host) just in case
-          activeOrders.retainWhere((o) => validGroupIds.contains(o['id']) || o['id'] == widget.groupKey);
+              .neq('status', OrderingConstants.orderStatusCancelled);
+          final validGroupIds =
+              Set<String>.from(validItemsRes.map((e) => e['order_group_id'].toString()));
+          if (validGroupIds.isNotEmpty) {
+            activeOrders.retainWhere(
+                (o) => validGroupIds.contains(o['id']) || o['id'] == widget.groupKey);
+          }
+        } catch (_) {}
       }
 
-      // Ensure sourceGroupId is valid (if not in list, maybe add it? separate fetch? usually it should be in list)
-      if (!activeOrders.any((o) => o['id'] == sourceGroupId)) {
-         // Should not happen unless status changed.
+      final contextObj = await repo.getOrderContext(sourceGroupId!);
+      if (contextObj == null) {
+        rawItems = [];
+      } else {
+        rawItems = contextObj.order.items
+          .where((it) => it.status != OrderingConstants.orderStatusCancelled)
+          .map((it) => {
+            'id': it.id,
+            'item_id': it.menuItemId,
+            'item_name': it.itemName,
+            'quantity': it.quantity,
+            'price': it.price,
+            'modifiers': it.selectedModifiers,
+            'note': it.note,
+            'status': it.status,
+            'target_print_category_ids': it.targetPrintCategoryIds,
+          }).toList();
+        allItems = _consolidateItems(rawItems);
+        _calculateTotals();
       }
-
-      // 2. Fetch Items for CURRENT sourceGroupId
-      final itemsRes = await supabase
-          .from('order_items')
-          .select('*') // Require Full info for duplication logic if quantities are split
-          .eq('order_group_id', sourceGroupId!)
-          .neq('status', 'cancelled')
-          .order('created_at', ascending: true);
-      
-      rawItems = List<Map<String, dynamic>>.from(itemsRes);
-      allItems = _consolidateItems(rawItems);
-      
-      _calculateTotals();
     } catch (e) {
       debugPrint("Load items error: $e");
     } finally {
@@ -201,82 +267,38 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
     if (_selectedItemsQty.isEmpty) return;
 
     setState(() => isLoading = true);
-    final supabase = Supabase.instance.client;
 
     try {
-      // 1. Create New Order Group (Sub-order)
-      // For simplicity, we assign it to the SAME tables, but it will be a new GLobal Group.
-      // To distinguish in UI, we might need a suffix or just rely on multiple groups per table (which we need to support in TableSelection).
-      // Let's copy the host's info.
-      
-      final hostGroup = await supabase.from('order_groups').select('shop_id, table_names, pax').eq('id', widget.groupKey).single();
-      final String shopId = hostGroup['shop_id'];
-      final List tableNames = hostGroup['table_names'];
-
-      // Create new group
-      final newGroupRes = await supabase.from('order_groups').insert({
-        'shop_id': shopId,
-        'table_names': tableNames, // Same tables
-        'status': 'dining',
-        'pax': 1, // Default to 1 or 0 for sub-bill
-        'note': '拆單 (來自原本的 ${widget.groupKey.substring(0,4)}...) [Parent:${widget.groupKey}]', // ADDED TAG
-        'color_index': DateTime.now().millisecondsSinceEpoch % 20 // Random color for distinction
-      }).select('id').single();
-      
-      final String newGroupId = newGroupRes['id'];
-
-      // 2. Move Items based on Qty mapped
-      List<String> itemsToFullyMove = [];
-      
+      final repo = ref.read(orderingRepositoryProvider);
+      // Build itemQuantitiesToMove: rawItemId → qty to move
+      // Handles partial qty splits (e.g. one DB row with qty=3, moving only 1)
+      final Map<String, int> itemQuantitiesToMove = {};
       for (var entry in _selectedItemsQty.entries) {
-         final syntheticId = entry.key;
-         int remainingMoveQty = entry.value;
-         if (remainingMoveQty <= 0) continue;
-         
-         final uiItem = allItems.firstWhere((e) => e['id'] == syntheticId);
-         final List<String> sourceIds = List<String>.from(uiItem['source_ids'] ?? []);
-         
-         for (var rawId in sourceIds) {
-             if (remainingMoveQty <= 0) break;
-             
-             final rawItem = rawItems.firstWhere((e) => e['id'] == rawId);
-             final rawQty = (rawItem['quantity'] as num).toInt();
-             
-             if (remainingMoveQty >= rawQty) {
-                 // Move this entire raw item
-                 itemsToFullyMove.add(rawId);
-                 remainingMoveQty -= rawQty;
-             } else {
-                 // Partial Move
-                 await supabase.from('order_items').update({
-                    'quantity': rawQty - remainingMoveQty
-                 }).eq('id', rawId);
-                 
-                 // Insert New Item to New Group
-                 await supabase.from('order_items').insert({
-                    'order_group_id': newGroupId,
-                    'item_id': rawItem['item_id'],
-                    'item_name': rawItem['item_name'],
-                    'price': rawItem['price'],
-                    'quantity': remainingMoveQty,
-                    'modifiers': rawItem['modifiers'], // Retain customization
-                    'note': rawItem['note'],
-                    'status': rawItem['status'],
-                    'target_print_category_ids': rawItem['target_print_category_ids'],
-                    'created_at': rawItem['created_at'], // Keep original creation time for timeline grouping
-                 });
-                 remainingMoveQty = 0;
-             }
-         }
+        final syntheticId = entry.key;
+        int remaining = entry.value;
+        if (remaining <= 0) continue;
+
+        final uiItem = allItems.firstWhere((e) => e['id'] == syntheticId);
+        final List<String> sourceIds = List<String>.from(uiItem['source_ids'] ?? []);
+
+        // Distribute moved qty across source rows (1 unit per row where possible)
+        for (final rawId in sourceIds) {
+          if (remaining <= 0) break;
+          itemQuantitiesToMove[rawId] = (itemQuantitiesToMove[rawId] ?? 0) + 1;
+          remaining--;
+        }
+        // If still remaining (fewer source rows than qty), assign rest to last source row
+        if (remaining > 0 && sourceIds.isNotEmpty) {
+          itemQuantitiesToMove[sourceIds.last] =
+              (itemQuantitiesToMove[sourceIds.last] ?? 0) + remaining;
+        }
       }
 
-      // Execute bulk update for fully moved items
-      if (itemsToFullyMove.isNotEmpty) {
-          await supabase
-              .from('order_items')
-              .update({'order_group_id': newGroupId})
-              .inFilter('id', itemsToFullyMove);
-      }
+      await repo.splitOrderGroup(
+        sourceGroupId: sourceGroupId!,
+        itemQuantitiesToMove: itemQuantitiesToMove,
+        targetTableNames: List<String>.from(widget.currentSeats),
+      );
 
       // 3. Success
       if (mounted) {
@@ -320,33 +342,26 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
 
     final bool? confirm = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
         title: Text("回復至主單?", style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        content: Text("此操作將把目前訂單的所有品項合併回「主單 (訂單 1)」，並取消此拆單。", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8))),
+        content: Text("此操作將把目前訂單的所有品項合併回「主單 (訂單 1)」，並取消此拆單。", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))),
         actions: [
            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("取消")),
-           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("確認回復", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+           TextButton(onPressed: () => Navigator.pop(context, true), child: Text("確認回復", style: TextStyle(color: Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold))),
         ],
       )
     );
 
     if (confirm != true) return;
-    
-    setState(() => isLoading = true);
-    final supabase = Supabase.instance.client;
 
     try {
-      await supabase
-          .from('order_items')
-          .update({'order_group_id': mainOrderId})
-          .eq('order_group_id', sourceGroupId!)
-          .neq('status', 'cancelled');
-
-      await supabase
-          .from('order_groups')
-          .update({'status': 'cancelled'})
-          .eq('id', sourceGroupId!);
+      final repo = ref.read(orderingRepositoryProvider);
+      await repo.revertSplit(
+        sourceGroupId: sourceGroupId!,
+        targetGroupId: mainOrderId,
+      );
 
       if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 已回復至主單")));
@@ -414,56 +429,26 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
 
     final bool? confirm = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
         title: Text("回復均分拆單?", style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        content: Text("偵測到此為「按人數均分」的訂單。\n確認要取消均分，並將所有品項回歸至原始訂單嗎？", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8))),
+        content: Text("偵測到此為「按人數均分」的訂單。\n確認要取消均分，並將所有品項回歸至原始訂單嗎？", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))),
         actions: [
            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("取消")),
-           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("確認回復", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+           TextButton(onPressed: () => Navigator.pop(context, true), child: Text("確認回復", style: TextStyle(color: Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold))),
         ],
       )
     );
-    
+
     if (confirm != true) return;
-    
-    setState(() => isLoading = true);
-    final supabase = Supabase.instance.client;
-    
+
     try {
-      // 1. Delete "Split Share" and "Split Deduction" items from ALL involved orders
-      final allInvolvedIds = [sourceId, ...childIds];
-      await supabase
-          .from('order_items')
-          .delete()
-          .inFilter('order_group_id', allInvolvedIds)
-          .inFilter('item_name', ['分攤餐費 (Split Share)', '拆單扣除 (Split Deduction)']);
-
-      // 2. Move any remaining items from Children to Source
-      if (childIds.isNotEmpty) {
-        await supabase
-            .from('order_items')
-            .update({'order_group_id': sourceId})
-            .inFilter('order_group_id', childIds)
-            .neq('status', 'cancelled');
-            
-        // 3. Cancel Child Orders
-        await supabase
-            .from('order_groups')
-            .update({'status': 'cancelled'})
-            .inFilter('id', childIds);
-      }
-
-      // 4. Clean up Source Note (Remove " | 均分 (1/N)" or just "均分 (1/N)")
-      // We need to fetch current note again or just use cached? cached is fine.
-      final sourceOrder = splitGroupOrders.firstWhere((o) => o['id'] == sourceId);
-      String sNote = sourceOrder['note'];
-      // Remove regex match
-      sNote = sNote.replaceAll(RegExp(r' \| 均分 \(\d+/\d+\)'), '').replaceAll(RegExp(r'均分 \(\d+/\d+\)'), '').trim();
-      // Handle leading pipe if any remaining (imperfect cleanup but okay)
-      if (sNote.startsWith('| ')) sNote = sNote.substring(2);
-      
-      await supabase.from('order_groups').update({'note': sNote}).eq('id', sourceId);
+      final repo = ref.read(orderingRepositoryProvider);
+      await repo.revertSplit(
+        sourceGroupId: sourceGroupId!, // Current order to revert
+        targetGroupId: sourceId,      // The original "1/N" order
+      );
 
       if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 已取消均分並回復")));
@@ -480,10 +465,76 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
     }    
   }
 
+  Widget _buildTabBar() {
+    return TabBar(
+      controller: _tabController,
+      labelColor: Colors.white,
+      unselectedLabelColor: Colors.white60,
+      indicatorColor: Colors.white,
+      tabs: const [
+        Tab(text: "按品項拆單"),
+        Tab(text: "按人數均分"),
+      ],
+    );
+  }
+
+  Widget _buildTabBody() {
+    if (isLoading) return const Center(child: CupertinoActivityIndicator());
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildSplitByItemsTab(),
+        _buildSplitByPaxTab(),
+      ],
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
-    // Check if current source is NOT main order
     final isSubOrder = activeOrders.isNotEmpty && sourceGroupId != activeOrders.first['id'];
+
+    if (widget.embedded) {
+      return Column(
+        children: [
+          // Embedded header
+          SafeArea(
+            bottom: false,
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 48),
+                  Expanded(
+                    child: Text(
+                      "拆單",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (isSubOrder)
+                    IconButton(
+                      icon: const Icon(CupertinoIcons.arrow_uturn_left_circle_fill, color: Colors.orange),
+                      tooltip: "回復至主單",
+                      onPressed: _executeMergeBack,
+                    )
+                  else
+                    IconButton(
+                      icon: Icon(CupertinoIcons.xmark, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
+                      onPressed: () => widget.onClose?.call(),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          _buildTabBar(),
+          Expanded(child: _buildTabBody()),
+        ],
+      );
+    }
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -493,31 +544,17 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
         actions: [
           if (isSubOrder)
             IconButton(
-              icon: const Icon(CupertinoIcons.arrow_uturn_left_circle_fill, color: Colors.orange), // Custom icon
+              icon: const Icon(CupertinoIcons.arrow_uturn_left_circle_fill, color: Colors.orange),
               tooltip: "回復至主單",
               onPressed: _executeMergeBack,
             ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Theme.of(context).colorScheme.primary,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: Theme.of(context).colorScheme.primary,
-          tabs: const [
-            Tab(text: "按品項拆單"),
-            Tab(text: "按人數均分"),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(kTextTabBarHeight),
+          child: _buildTabBar(),
         ),
       ),
-      body: isLoading 
-        ? const Center(child: CupertinoActivityIndicator())
-        : TabBarView(
-            controller: _tabController,
-            children: [
-              _buildSplitByItemsTab(),
-              _buildSplitByPaxTab(),
-            ],
-          ),
+      body: _buildTabBody(),
     );
   }
 
@@ -528,50 +565,48 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
         // Headers
         Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-          color: Theme.of(context).cardColor.withOpacity(0.5),
+          color: Theme.of(context).cardColor.withValues(alpha: 0.5),
           child: Row(
             children: [
               Expanded(
-                child: activeOrders.length > 1 
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).cardColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: sourceGroupId,
-                          isDense: true,
-                          isExpanded: true,
-                          icon: const Icon(CupertinoIcons.chevron_down, size: 16),
-                          items: activeOrders.asMap().entries.map((entry) {
-                            final int idx = entry.key + 1;
-                            final Map<String, dynamic> order = entry.value;
-                            final String id = order['id'];
-                            
-                            return DropdownMenuItem(
-                              value: id,
-                              child: Text(
-                                "訂單 $idx",
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null && val != sourceGroupId) {
-                              setState(() {
-                                sourceGroupId = val;
-                                _selectedItemsQty.clear(); // Reset selection on change
-                              });
-                              _loadData(); // Reload items for new source
-                            }
-                          },
+                child: activeOrders.length > 1
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      ),
-                    )
-                  : Text("原訂單 (\$${leftTotal.toStringAsFixed(0)})", style: const TextStyle(fontWeight: FontWeight.bold))
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: sourceGroupId,
+                            isDense: true,
+                            isExpanded: true,
+                            icon: const Icon(CupertinoIcons.chevron_down, size: 16),
+                            items: activeOrders.asMap().entries.map((entry) {
+                              final int idx = entry.key + 1;
+                              final Map<String, dynamic> order = entry.value;
+                              return DropdownMenuItem(
+                                value: order['id'] as String,
+                                child: Text(
+                                  "訂單 $idx",
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null && val != sourceGroupId) {
+                                setState(() {
+                                  sourceGroupId = val;
+                                  _selectedItemsQty.clear();
+                                });
+                                _loadData();
+                              }
+                            },
+                          ),
+                        ),
+                      )
+                    : Text("原訂單 (\$${leftTotal.toStringAsFixed(0)})", style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
               const Icon(CupertinoIcons.arrow_right_arrow_left, size: 20, color: Colors.grey),
               Expanded(child: Text("  新訂單 (\$${rightTotal.toStringAsFixed(0)})", style: const TextStyle(fontWeight: FontWeight.bold))),
@@ -584,6 +619,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
               // Left List (Original)
               Expanded(
                 child: ListView.builder(
+                  padding: EdgeInsets.zero,
                   itemCount: allItems.length,
                   itemBuilder: (context, index) {
                     final item = allItems[index];
@@ -600,6 +636,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
               // Right List (New)
               Expanded(
                 child: ListView.builder(
+                  padding: EdgeInsets.zero,
                   itemCount: allItems.length,
                   itemBuilder: (context, index) {
                     final item = allItems[index];
@@ -641,8 +678,8 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                           shape: const StadiumBorder(),
                           backgroundColor: Theme.of(context).colorScheme.primary,
                           foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                          disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.12),
-                          disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
+                          disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
+                          disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
                           elevation: 0,
                         ),
                           onPressed: _isMoveValid() ? _executeSplitItems : null,
@@ -688,7 +725,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5))),
+          border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.5))),
         ),
         child: Row(
           children: [
@@ -699,7 +736,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(item['item_name'], style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w500)),
-                  Text("\$${(price * displayQty).toStringAsFixed(0)} (x$displayQty)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13)),
+                  Text("\$${(price * displayQty).toStringAsFixed(0)} (x$displayQty)", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                 ],
               ),
             ),
@@ -724,72 +761,29 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       builder: (context) => AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
         title: Text("確認人數均分?", style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        content: Text("將總金額 \$$totalAmount 均分為 $pax 份。\n系統將自動產生 ${pax-1} 張新訂單，並加入「分攤餐費」品項。", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8))),
+        content: Text("將總金額 \$$totalAmount 均分為 $pax 份。\n系統將自動產生 ${pax-1} 張新訂單，並加入「分攤餐費」品項。", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))),
         actions: [
            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("取消")),
-           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("確認", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+           TextButton(onPressed: () => Navigator.pop(context, true), child: Text("確認", style: TextStyle(color: Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold))),
         ],
       )
     );
     if (confirm != true) return;
 
     setState(() => isLoading = true);
-    final supabase = Supabase.instance.client;
 
     try {
-      // 1. Fetch Source Group Details
-      final sourceGroup = await supabase.from('order_groups').select().eq('id', sourceGroupId!).single();
-      final String shopId = sourceGroup['shop_id'];
-      final List tableNames = sourceGroup['table_names'];
-      final double perPerson = totalAmount / pax;
-      
-      // 2. Create N-1 New Orders
-      for (int i = 2; i <= pax; i++) {
-        final newGroupRes = await supabase.from('order_groups').insert({
-          'shop_id': shopId,
-          'table_names': tableNames,
-          'status': 'dining',
-          'pax': 1,
-          'note': '均分 (${i}/$pax) [Parent:$sourceGroupId]', // ADDED TAG
-          'color_index': (DateTime.now().millisecondsSinceEpoch + i) % 20 
-        }).select('id').single();
-        
-        final String newGroupId = newGroupRes['id'];
-        
-        // Add "Split Share" Item to New Order
-        await supabase.from('order_items').insert({
-          'order_group_id': newGroupId,
-          'item_name': '分攤餐費 (Split Share)',
-          'price': perPerson,
-          'quantity': 1,
-          'status': 'served', // Auto served
-        });
-      }
-      
-      // 3. Update Source Order: Add "Split Deduction" Item
-      // Deduct (Total - Share) to leave exactly 1 Share in Source
-      // Offset = -(Total - Share) = -(Share * (Pax - 1))
-      // Or we can add a negative item.
-      final double deduction = -(totalAmount - perPerson);
-      
-      await supabase.from('order_items').insert({
-          'order_group_id': sourceGroupId!,
-          'item_name': '拆單扣除 (Split Deduction)',
-          'price': deduction,
-          'quantity': 1,
-          'status': 'served',
-      });
-      
-      // 4. Update Source Order Note
-      final String oldNote = sourceGroup['note'] ?? '';
-      final String newNote = oldNote.isEmpty ? '均分 (1/$pax)' : '$oldNote | 均分 (1/$pax)';
-      await supabase.from('order_groups').update({'note': newNote}).eq('id', sourceGroupId!);
+      final repo = ref.read(orderingRepositoryProvider);
+      await repo.splitByPax(
+        sourceGroupId: sourceGroupId!,
+        pax: pax,
+        totalAmount: totalAmount,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 人數均分完成")));
-        await _loadData(); 
+        await _loadData();
       }
-      
     } catch (e) {
       debugPrint("Split by Pax failed: $e");
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("均分失敗: $e")));
@@ -807,9 +801,9 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
        child: Column(
          mainAxisAlignment: MainAxisAlignment.center,
          children: [
-           Text("總金額", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 18)),
+           const Text("總金額", style: TextStyle(color: Colors.white70, fontSize: 18)),
            const SizedBox(height: 8),
-           Text("\$${totalAmount.toStringAsFixed(0)}", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 40, fontWeight: FontWeight.bold)),
+           Text("\$${totalAmount.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
            
            const SizedBox(height: 40),
            
@@ -822,7 +816,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                Container(
                  width: 120,
                  alignment: Alignment.center,
-                 child: Text("$pax 人", style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 32, fontWeight: FontWeight.bold)),
+                 child: Text("$pax 人", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                ),
                _circleBtn(CupertinoIcons.add, () => setState(() => pax++)),
              ],
@@ -832,9 +826,9 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
            Divider(color: Theme.of(context).dividerColor),
            const SizedBox(height: 40),
            
-           Text("每人應付", style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 18)),
+           const Text("每人應付", style: TextStyle(color: Colors.white70, fontSize: 18)),
            const SizedBox(height: 8),
-           Text("\$${perPerson.toStringAsFixed(0)}", style: const TextStyle(color: Color(0xFF32D74B), fontSize: 48, fontWeight: FontWeight.bold)),
+           Text("\$${perPerson.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold)),
            
            const Spacer(),
            
@@ -846,8 +840,8 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
                  shape: const StadiumBorder(),
                  backgroundColor: Theme.of(context).colorScheme.primary,
                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                 disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.12),
-                 disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
+                 disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
+                 disabledForegroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
                  elevation: 0,
                ),
                onPressed: pax > 1 ? _executeSplitByPax : null, 
@@ -855,7 +849,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
              ),
            ),
            const SizedBox(height: 16),
-           const Text("此操作將產生分攤項目並修改訂單", style: TextStyle(color: Colors.grey, fontSize: 12)),
+           const Text("此操作將產生分攤項目並修改訂單", style: TextStyle(color: Colors.white38, fontSize: 12)),
          ],
        ),
      );
@@ -867,7 +861,7 @@ class _SplitBillScreenState extends State<SplitBillScreen> with SingleTickerProv
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10)],
       ),
       child: IconButton(
          icon: Icon(icon, color: Theme.of(context).colorScheme.onSurface),

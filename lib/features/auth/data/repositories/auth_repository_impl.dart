@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:gallery205_staff_app/features/auth/data/datasources/auth_data_source.dart';
 import 'package:gallery205_staff_app/features/auth/domain/entities/auth_user.dart';
 import 'package:gallery205_staff_app/features/auth/domain/repositories/auth_repository.dart';
+import 'package:gallery205_staff_app/core/services/widget_session_service.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
   final AuthRemoteDataSource remoteDataSource;
@@ -80,10 +81,13 @@ class AuthRepositoryImpl implements AuthRepository {
     
     // Save critical shop info for HomeScreen
     await localDataSource.saveCurrentShopInfo(
-      shopId: userModel.shopId, 
+      shopId: userModel.shopId,
       shopCode: userModel.shopCode
     );
-    
+
+    // Sync session to iOS Widget
+    await WidgetSessionService.syncSession();
+
     return userModel;
   }
 
@@ -91,6 +95,7 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> logout() async {
     await remoteDataSource.logout();
     await localDataSource.clearUserSession();
+    await WidgetSessionService.clearSession();
   }
 
   @override

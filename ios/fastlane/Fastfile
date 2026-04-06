@@ -4,7 +4,18 @@ platform :ios do
   desc "Push a new beta build to TestFlight"
   lane :beta do
     increment_build_number(xcodeproj: "Runner.xcodeproj")
-    build_app(workspace: "Runner.xcworkspace", scheme: "Runner")
+    build_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "app-store",
+      export_options: {
+        signingStyle: "manual",
+        provisioningProfiles: {
+          "com.caffreywu.tableOrderingApp" => "Gallery205_AppStore_Profile",
+          "com.caffreywu.tableOrderingApp.ScheduleWidget" => "Gallery205_Widget_AppStore_Profile"
+        }
+      }
+    )
     upload_to_testflight
   end
 end

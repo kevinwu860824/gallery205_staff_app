@@ -129,10 +129,14 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
           ),
         ],
       ),
-      body: isLoading
+      body: Builder(builder: (context) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+        final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+        return isLoading
           ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
           : ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               itemCount: roles.length,
               itemBuilder: (context, index) {
                 final role = roles[index];
@@ -157,7 +161,8 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
                   ),
                 );
               },
-            ),
+            );
+      }),
     );
   }
 }
@@ -349,7 +354,8 @@ class _RolePermissionEditorScreenState extends State<RolePermissionEditorScreen>
         case AppPermissions.setCostCat: return l10n.permSetCostCat;
         case AppPermissions.setInv: return l10n.permSetInv;
         case AppPermissions.setCashReg: return l10n.permSetCashReg;
-        default: return key; 
+        case AppPermissions.setHub: return 'Hub 裝置管理';
+        default: return key;
       }
   }
 
@@ -369,6 +375,9 @@ class _RolePermissionEditorScreenState extends State<RolePermissionEditorScreen>
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -393,7 +402,7 @@ class _RolePermissionEditorScreenState extends State<RolePermissionEditorScreen>
                 children: [
                   if (!widget.isSystemDefault)
                     Padding(
-                      padding: const EdgeInsets.all(16.0),
+                      padding: EdgeInsets.fromLTRB(hPadding, 16, hPadding, 16),
                       child: CupertinoTextField(
                         controller: nameController,
                         placeholder: l10n.roleMgmtRoleNameHint,
@@ -420,14 +429,14 @@ class _RolePermissionEditorScreenState extends State<RolePermissionEditorScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                              padding: EdgeInsets.fromLTRB(hPadding, 24, hPadding, 8),
                               child: Text(
                                 translatedGroupName,
                                 style: TextStyle(color: colorScheme.outline, fontSize: 14, fontWeight: FontWeight.bold),
                               ),
                             ),
                             Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 16),
+                              margin: EdgeInsets.symmetric(horizontal: hPadding),
                               decoration: BoxDecoration(
                                 color: theme.cardColor,
                                 borderRadius: BorderRadius.circular(12),
@@ -463,7 +472,7 @@ class _RolePermissionEditorScreenState extends State<RolePermissionEditorScreen>
 
                   if (!widget.isSystemDefault)
                     Padding(
-                      padding: const EdgeInsets.all(24.0),
+                      padding: EdgeInsets.fromLTRB(hPadding, 24, hPadding, 24),
                       child: SizedBox(
                         width: double.infinity,
                         height: 50,

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "167824784116",
+    "project_id": "gallery-staff-app",
+    "storage_bucket": "gallery-staff-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:167824784116:android:8fd3408682131d7bb8fca1",
+        "android_client_info": {
+          "package_name": "com.caffreywu.tableOrderingApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALIdS6ULIR2AdOqAbeAn87e7kBt5uVCT8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

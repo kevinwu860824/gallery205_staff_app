@@ -523,9 +523,13 @@ class _MakeUpDialogState extends State<_MakeUpDialog> {
         borderRadius: BorderRadius.circular(10)
     );
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20), // Match AddTaskDialog
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -550,24 +554,40 @@ class _MakeUpDialogState extends State<_MakeUpDialog> {
               GestureDetector(
                 onTap: () async {
                   // Show simple selection dialog
-                  final result = await showCupertinoModalPopup<String>(
+                  final result = await showModalBottomSheet<String>(
                     context: context,
-                    builder: (ctx) => CupertinoActionSheet(
-                      actions: [
-                        CupertinoActionSheetAction(
-                          onPressed: () => Navigator.pop(ctx, 'Clock-in'),
-                          child: Text(l10n.punchMakeUpTypeIn),
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) {
+                      final sheetTheme = Theme.of(ctx);
+                      final sheetColorScheme = sheetTheme.colorScheme;
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: sheetTheme.cardColor,
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                         ),
-                        CupertinoActionSheetAction(
-                          onPressed: () => Navigator.pop(ctx, 'Clock-out'),
-                          child: Text(l10n.punchMakeUpTypeOut),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(height: 8),
+                            Container(width: 40, height: 4, decoration: BoxDecoration(color: sheetColorScheme.onSurface.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
+                            ListTile(
+                              title: Text(l10n.punchMakeUpTypeIn, style: TextStyle(color: sheetColorScheme.onSurface)),
+                              onTap: () => Navigator.pop(ctx, 'Clock-in'),
+                            ),
+                            Divider(color: sheetColorScheme.onSurface.withValues(alpha: 0.1), height: 1),
+                            ListTile(
+                              title: Text(l10n.punchMakeUpTypeOut, style: TextStyle(color: sheetColorScheme.onSurface)),
+                              onTap: () => Navigator.pop(ctx, 'Clock-out'),
+                            ),
+                            ListTile(
+                              title: Text(l10n.commonCancel, style: TextStyle(color: sheetColorScheme.onSurfaceVariant)),
+                              onTap: () => Navigator.pop(ctx),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                         ),
-                      ],
-                      cancelButton: CupertinoActionSheetAction(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: Text(l10n.commonCancel),
-                      ),
-                    ),
+                      );
+                    },
                   );
                   if (result != null) {
                     setState(() => type = result);
@@ -682,7 +702,7 @@ Widget _buildHeader(BuildContext context, double safeAreaTop, String title) {
     right: 0,
     child: Container(
       color: Theme.of(context).scaffoldBackgroundColor,
-      padding: EdgeInsets.only(top: safeAreaTop, bottom: 10, left: 16, right: 16),
+      padding: EdgeInsets.only(top: safeAreaTop, bottom: 10, left: 8, right: 8),
       child: Row(
         children: [
           IconButton(
@@ -810,9 +830,13 @@ class _NoticeDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -866,9 +890,13 @@ class _ConfirmMakeUpDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -877,7 +905,7 @@ class _ConfirmMakeUpDialog extends StatelessWidget {
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start, 
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Center( 
               child: Text(

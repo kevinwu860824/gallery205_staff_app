@@ -773,17 +773,22 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final isKeyboardVisible = keyboardHeight > 0;
     const toolbarHeight = 45.0; // 工具列高度
-    
+
     // 3. 計算內容的底部 padding (確保最後一個輸入框能被捲動到工具列上方)
     final contentBottomPadding = isKeyboardVisible ? (keyboardHeight + toolbarHeight + 20) : 60.0;
+
+    // 4. iPad padding
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     Widget content;
     if (_isLoading || _mode == CashScreenMode.loading) {
       content = Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface));
     } else if (_mode == CashScreenMode.openCashAudit) {
-      content = _buildOpenAuditUI(bottomPadding: contentBottomPadding);
+      content = _buildOpenAuditUI(bottomPadding: contentBottomPadding, hPadding: hPadding);
     } else {
-      content = _buildSettlementUI(bottomPadding: contentBottomPadding);
+      content = _buildSettlementUI(bottomPadding: contentBottomPadding, hPadding: hPadding);
     }
 
     return Scaffold(
@@ -843,14 +848,14 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     );
   }
 
-  Widget _buildOpenAuditUI({required double bottomPadding}) {
+  Widget _buildOpenAuditUI({required double bottomPadding, double hPadding = 16.0}) {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isMatch = _totalCash == _pettyCashAmount;
     final successColor = theme.brightness == Brightness.dark ? Colors.white : Colors.green[700]!;
     return ListView(
-      padding: EdgeInsets.only(left: 16.0, right: 16.0, bottom: bottomPadding),
+      padding: EdgeInsets.only(left: hPadding, right: hPadding, bottom: bottomPadding),
       children: [
         const SizedBox(height: 10),
         Text(
@@ -878,13 +883,13 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     );
   }
 
-  Widget _buildSettlementUI({required double bottomPadding}) {
+  Widget _buildSettlementUI({required double bottomPadding, double hPadding = 16.0}) {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final successColor = theme.brightness == Brightness.dark ? Colors.white : Colors.green[700]!;
     return ListView(
-      padding: EdgeInsets.only(left: 16.0, right: 16.0, top: 16.0, bottom: bottomPadding),
+      padding: EdgeInsets.only(left: hPadding, right: hPadding, top: 16.0, bottom: bottomPadding),
       children: [
         Text(l10n.cashSettlementRevenueAndPayment, style: TextStyle(color: colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w700)), 
         const SizedBox(height: 12),
@@ -1027,24 +1032,45 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    if (_mode == CashScreenMode.loading) return; 
+    if (_mode == CashScreenMode.loading) return;
 
-    showCupertinoModalPopup(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => CupertinoActionSheet(
-        title: Text(l10n.cashSettlementDepositSheetTitle), 
-        actions: [
-          CupertinoActionSheetAction(
-            child: Text(l10n.cashSettlementDepositNew), 
-            onPressed: () {
-              Navigator.pop(context);
-              _showNewDepositDialog();
-            },
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          child: Text(l10n.commonCancel), 
-          onPressed: () => Navigator.pop(context),
+      backgroundColor: theme.cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: colorScheme.onSurface.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              l10n.cashSettlementDepositSheetTitle,
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              title: Text(l10n.cashSettlementDepositNew, style: TextStyle(color: colorScheme.onSurface, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showNewDepositDialog();
+              },
+            ),
+            ListTile(
+              title: Text(l10n.commonCancel, style: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 16)),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -1054,6 +1080,9 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final amountCtrl = TextEditingController();
@@ -1064,7 +1093,7 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
       builder: (context) {
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+          insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -1121,7 +1150,7 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
       });
       if (mounted) _showNoticeDialog(l10n.commonSuccess, l10n.cashSettlementDepositAddSuccess); 
     } catch (e) {
-      if (mounted) _showNoticeDialog(l10n.inventoryErrorTitle, '${l10n.punchErrorGeneric(e.toString())}'); 
+      if (mounted) _showNoticeDialog(l10n.inventoryErrorTitle, l10n.punchErrorGeneric(e.toString()));
     }
   }
 
@@ -1130,6 +1159,9 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
     // 查詢尚未被折抵的訂金 (transaction_id is null)
     final res = await Supabase.instance.client
         .from('deposits')
@@ -1149,7 +1181,7 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
           builder: (context, setStateSB) {
             return Dialog(
               backgroundColor: Colors.transparent,
-              insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+              insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
               child: Container(
                 height: 500,
                 padding: const EdgeInsets.all(20),
@@ -1219,8 +1251,8 @@ class _CashSettlementScreenState extends ConsumerState<CashSettlementScreen> {
       style: TextStyle(color: colorScheme.onSurface),
       decoration: InputDecoration(
         labelText: hint,
-        labelStyle: TextStyle(color: Colors.grey),
-        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+        labelStyle: TextStyle(color: colorScheme.onSurface.withValues(alpha: 0.5)),
+        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: colorScheme.onSurface.withValues(alpha: 0.3))),
         focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: colorScheme.onSurface)),
       ),
     );
@@ -1240,13 +1272,13 @@ PreferredSizeWidget _buildHeader(BuildContext context, String title, {bool enabl
       color: theme.scaffoldBackgroundColor,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
         child: Row(
           children: [
             CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.zero,
               child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
-              onPressed: () => context.go('/home'), 
+              onPressed: () => context.go('/home'),
             ),
             Expanded(
               child: Text(
@@ -1262,8 +1294,8 @@ PreferredSizeWidget _buildHeader(BuildContext context, String title, {bool enabl
             if (enableDeposit)
                 CupertinoButton(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Icon(CupertinoIcons.add, color: colorScheme.onSurface, size: 28),
                   onPressed: onAddPressed,
+                  child: Icon(CupertinoIcons.add, color: colorScheme.onSurface, size: 28),
                 )
             else
                 const SizedBox(width: 58), 
@@ -1360,9 +1392,12 @@ class _NoticeDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -1407,10 +1442,13 @@ class _ConfirmReviewDialog extends StatelessWidget {
         final theme = Theme.of(context);
         final colorScheme = theme.colorScheme;
         final currencyFormat = NumberFormat('#,###', 'zh_TW');
-        
+        final screenWidth = MediaQuery.of(context).size.width;
+        final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+        final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 20.0;
+
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+          insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(

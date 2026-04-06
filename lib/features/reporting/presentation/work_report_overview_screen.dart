@@ -235,7 +235,11 @@ class _WorkReportOverviewScreenState extends State<WorkReportOverviewScreen> {
       context: context,
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: MediaQuery.of(context).size.shortestSide >= 600
+              ? (MediaQuery.of(context).size.width - 480) / 2
+              : 20,
+        ),
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -318,7 +322,10 @@ class _WorkReportOverviewScreenState extends State<WorkReportOverviewScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
@@ -326,7 +333,7 @@ class _WorkReportOverviewScreenState extends State<WorkReportOverviewScreen> {
           children: [
             // --- 1. Header ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -358,7 +365,7 @@ class _WorkReportOverviewScreenState extends State<WorkReportOverviewScreen> {
 
             // --- 2. Month Navigator ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -392,7 +399,7 @@ class _WorkReportOverviewScreenState extends State<WorkReportOverviewScreen> {
                   : _reports.isEmpty
                       ? Center(child: Text(l10n.workReportOverviewNoRecords, style: TextStyle(color: colorScheme.onSurfaceVariant))) // Modified to use theme color
                       : ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
                           itemCount: _reports.length,
                           itemBuilder: (context, index) {
                             final report = _reports[index];

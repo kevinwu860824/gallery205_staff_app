@@ -27,7 +27,8 @@ class PayrollService {
     final userRes = await _supabase
         .from('user_shop_map')
         .select('user_id, salary_type, base_wage, users(name)')
-        .eq('shop_code', shopId);
+        .eq('shop_code', shopId)
+        .eq('is_active', true);
 
     final List<Map<String, dynamic>> users = List<Map<String, dynamic>>.from(userRes);
 

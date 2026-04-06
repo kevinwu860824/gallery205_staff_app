@@ -185,6 +185,12 @@ class AppLocalizationsIt extends AppLocalizations {
   String get scheduleSelectGroups => 'Seleziona Gruppi';
 
   @override
+  String get scheduleSelectAll => 'Seleziona tutto';
+
+  @override
+  String get scheduleDeselectAll => 'Deseleziona tutto';
+
+  @override
   String get commonDone => 'Fatto';
 
   @override

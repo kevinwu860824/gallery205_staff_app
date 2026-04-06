@@ -63,19 +63,57 @@ class KitchenTicketServiceImpl implements KitchenTicketService {
           staffName: (event.staffName != null && event.staffName!.isNotEmpty) ? event.staffName! : fullContext.staffName,
        );
 
-       // 3. Process Printing
-       final failedItemIds = await printerService.processOrderPrinting(
+       // 3. Process Printing — returns Map<printerIp, Set<failedItemId>>
+       final failedMap = await printerService.processOrderPrinting(
           orderContext,
           printerSettings,
           allPrintCategories,
           orderSeq
        );
 
-       // 4. Update Status
+       // 4. Update print_jobs + print_status
        if (!event.isOffline) {
-          final allItemIds = event.items.map((e) => e.id).toList();
-          final successItemIds = allItemIds.where((id) => !failedItemIds.contains(id)).toList();
+          // Build ip -> assigned station IDs lookup + ip -> printer name lookup
+          final Map<String, Set<String>> ipToStations = {};
+          final Map<String, String> ipToName = {};
+          for (var p in printerSettings) {
+             final ip = p['ip'] as String?;
+             if (ip == null || ip.isEmpty) continue;
+             final assigned = List<String>.from(p['assigned_print_category_ids'] ?? []);
+             ipToStations[ip] = Set<String>.from(assigned);
+             ipToName[ip] = (p['name'] as String?)?.isNotEmpty == true ? p['name'] as String : ip;
+          }
 
+          // Build per-item print_jobs and determine overall status
+          final Map<String, Map<String, dynamic>> itemPrintJobs = {};
+          final List<String> successItemIds = [];
+          final List<String> failedItemIds = [];
+
+          for (var item in event.items) {
+             final Map<String, dynamic> jobs = {};
+             for (var entry in ipToStations.entries) {
+                final ip = entry.key;
+                final stations = entry.value;
+                if (item.targetPrintCategoryIds.any((s) => stations.contains(s))) {
+                   final failed = failedMap[ip]?.contains(item.id) ?? false;
+                   jobs[ip] = {'status': failed ? 'failed' : 'success', 'name': ipToName[ip] ?? ip};
+                }
+             }
+             if (jobs.isNotEmpty) {
+                itemPrintJobs[item.id] = jobs;
+             }
+
+             final anyFailed = jobs.values.any((j) => j['status'] == 'failed');
+             if (anyFailed) {
+                failedItemIds.add(item.id);
+             } else {
+                successItemIds.add(item.id);
+             }
+          }
+
+          if (itemPrintJobs.isNotEmpty) {
+             await orderingRepository.updatePrintJobs(itemPrintJobs);
+          }
           if (successItemIds.isNotEmpty) {
              await orderingRepository.updatePrintStatus(successItemIds, 'success');
           }

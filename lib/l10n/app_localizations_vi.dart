@@ -185,6 +185,12 @@ class AppLocalizationsVi extends AppLocalizations {
   String get scheduleSelectGroups => 'Chọn nhóm';
 
   @override
+  String get scheduleSelectAll => 'Chọn tất cả';
+
+  @override
+  String get scheduleDeselectAll => 'Bỏ chọn tất cả';
+
+  @override
   String get commonDone => 'Xong';
 
   @override

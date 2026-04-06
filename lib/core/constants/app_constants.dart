@@ -34,5 +34,13 @@ class AppConstants {
   // --- Shared Preferences Keys ---
   static const String keyLanguageCode = 'language_code';
   static const String keySavedShopId = 'savedShopId';
+  static const String keyIsHubDevice = 'isHubDevice';
+  static const String keyHubIpAddress = 'hubIpAddress';
+
+  // --- Hub Server ---
+  static const int hubServerPort = 7205;
+
+  // --- App Update ---
+  static const String testFlightUrl = 'https://testflight.apple.com/join/ePR7yAq8';
 
 }

@@ -365,7 +365,10 @@ class _PayrollDetailScreenState extends State<PayrollDetailScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -382,7 +385,7 @@ class _PayrollDetailScreenState extends State<PayrollDetailScreen> {
       body: _isLoading 
         ? const Center(child: CupertinoActivityIndicator())
         : ListView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
             children: [
               // 1. Stage 2 Card
               _buildSectionTitle(theme, '階段二：薪資試算'),

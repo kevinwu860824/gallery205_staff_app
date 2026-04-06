@@ -20,7 +20,7 @@ const List<Color> _groupColors = [
       Color(0xFF5E5CE6), // Indigo
       Color(0xFFBF5AF2), // Purple
       Color(0xFF64D2FF), // Light Blue
-      Color(0xFF30D158), // Emerald Green
+      Color(0xFFFF375F), // Rose
       Color(0xFFD1D1D6), // Light Grey
   ];
 

@@ -1,7 +1,7 @@
 name: gallery205_staff_app
 description: "A new Flutter project."
 publish_to: 'none'
-version: 1.0.1+11
+version: 1.0.2+1
 
 environment:
   sdk: '>=3.4.1 <4.0.0'
@@ -29,6 +29,10 @@ dependencies:
   # --- State Management ---
   flutter_riverpod: ^2.5.1
   
+  # --- App Version ---
+  package_info_plus: ^8.0.0
+  url_launcher: ^6.3.0
+
   # --- Utilities ---
   path: ^1.8.3
   uuid: ^4.2.0
@@ -37,6 +41,8 @@ dependencies:
   permission_handler: ^12.0.1
   geolocator: ^12.0.0
   network_info_plus: ^7.0.0
+  device_info_plus: ^10.0.0
+  connectivity_plus: ^6.0.0
   timezone: ^0.10.1
   
   # --- UI & Widgets ---
@@ -63,6 +69,14 @@ dependencies:
   latlong2: ^0.9.0
   google_maps_flutter: ^2.5.0
   
+  # --- Hub Server (LAN local server) ---
+  shelf: ^1.4.0
+  shelf_router: ^1.1.0
+  shelf_web_socket: ^2.0.0
+  web_socket_channel: ^3.0.0
+  http: ^1.2.0
+  wakelock_plus: ^1.2.8
+
   # --- Hardware (Printer/Camera) ---
   esc_pos_utils: ^1.1.0
   esc_pos_printer: ^4.0.5

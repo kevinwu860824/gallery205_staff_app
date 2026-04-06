@@ -82,7 +82,7 @@ serve(async (req) => {
 
     // 3. Prepare ezPay Payload
     const totalAmt = Math.round(order.final_amount);
-    const amt = Math.round(totalAmt / 1.05);
+    const amt = Math.floor(totalAmt / 1.05);
     const taxAmt = totalAmt - amt;
 
     let itemsSum = 0;
@@ -129,7 +129,7 @@ serve(async (req) => {
       RespondType: 'JSON',
       Version: '1.5',
       TimeStamp: Math.floor(Date.now() / 1000).toString(),
-      MerchantOrderNo: order.id.replace(/-/g, '_').substring(0, 20), // Shortened to 20 for safety
+      MerchantOrderNo: order.id.replace(/-/g, '_').slice(-20),
       Status: '1', // 1: Issue directly
       Category: order.buyer_ubn ? 'B2B' : 'B2C',
       BuyerName: order.buyer_ubn ? (order.buyer_name || 'Customer') : 'Customer',
@@ -161,8 +161,10 @@ serve(async (req) => {
     const checkValue = await sha256(`${ezpaySettings.hash_key}${aesEncrypted}${ezpaySettings.hash_iv}`);
 
     // 5. Call ezPay API
-    // IMPORTANT: In production, ensure EZPAY_URL is set to https://einvoice.ezpay.com.tw/Api/invoice_issue
-    const ezpayUrl = Deno.env.get('EZPAY_URL') || 'https://cinv.ezpay.com.tw/Api/invoice_issue';
+    // Production: https://einvoice.ezpay.com.tw/Api/invoice_issue
+    // Sandbox:    https://cinv.ezpay.com.tw/Api/invoice_issue
+    const ezpayUrl = Deno.env.get('EZPAY_URL');
+    if (!ezpayUrl) throw new Error('EZPAY_URL environment variable is not set. Please configure it in Supabase Dashboard → Project Settings → Edge Functions.');
     const postData = new URLSearchParams();
     postData.append('MerchantID_', ezpaySettings.merchant_id);
     postData.append('PostData_', aesEncrypted);

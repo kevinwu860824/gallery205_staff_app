@@ -21,12 +21,14 @@ abstract class SessionRepository {
   Future<void> mergeOrderGroups({
     required String hostGroupId,
     required List<String> targetGroupIds,
+    int? colorIndex,
   });
 
   /// Unmerges specific child groups from a host group.
   Future<void> unmergeOrderGroups({
     required String hostGroupId,
     required List<String> targetGroupIds,
+    Map<String, String>? tableOverrides, // childGroupId → new table name
   });
 
   /// Updates table selection for a group (Move Table).
@@ -34,10 +36,17 @@ abstract class SessionRepository {
     required String hostGroupId,
     required List<String> oldTables,
     required List<String> newTables,
+    int? colorIndex,
   });
+
+  /// Picks a color index that avoids conflicts with nearby occupied tables.
+  Future<int> pickColorForTables(List<String> tableNames);
 
   /// Fetches IDs of groups merged into the host.
   Future<List<String>> fetchMergedChildGroups(String hostGroupId);
+
+  /// Fetches a map of childGroupId → table names for all merged children.
+  Future<Map<String, List<String>>> fetchMergedChildGroupsWithTables(String hostGroupId);
 
   /// Deletes an order group entirely (used for empty sessions).
   Future<void> deleteOrderGroup(String orderGroupId);

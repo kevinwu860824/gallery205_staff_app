@@ -240,7 +240,10 @@ class _MonthlyCostInputScreenState extends State<MonthlyCostInputScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _buildHeader(context, l10n.monthlyCostTitle, actions: [ 
@@ -258,7 +261,7 @@ class _MonthlyCostInputScreenState extends State<MonthlyCostInputScreen> {
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -456,7 +459,11 @@ class _NoticeDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 40,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

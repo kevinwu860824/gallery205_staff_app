@@ -101,14 +101,18 @@ class _InventoryViewScreenState extends State<InventoryViewScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       // 這裡的 AppBar 只需顯示標題
-      appBar: _buildSimpleAppBar(context, l10n.inventoryViewTitle), 
+      appBar: _buildSimpleAppBar(context, l10n.inventoryViewTitle),
       body: _isLoading
           ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
           : ListView(
-              padding: const EdgeInsets.only(top: 20, left: 16, right: 16, bottom: 40),
+              padding: EdgeInsets.only(top: 20, left: hPadding, right: hPadding, bottom: 40),
               children: [
                 Container(
                   decoration: BoxDecoration(
@@ -204,7 +208,9 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
     for (var item in res) {
       final itemId = item['id'] as String;
       final currentStock = (item['current_stock'] as num?)?.toDouble() ?? 0.0;
-      final currentStockStr = currentStock.toStringAsFixed(0);
+      final currentStockStr = currentStock % 1 == 0
+          ? currentStock.toInt().toString()
+          : currentStock.toStringAsFixed(1);
 
       loadedItems.add(item);
 
@@ -213,13 +219,13 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
         _stockControllers[itemId] = TextEditingController(text: currentStockStr);
       } else {
         // 如果使用者沒在編輯，才更新數值
-        if ((_initialStockValues[itemId] ?? 0) != currentStock) {
+        if ((_initialStockValues[itemId] ?? 0) != double.parse(currentStockStr)) {
            _stockControllers[itemId]!.text = currentStockStr;
         }
       }
       
       _focusNodes[itemId] = FocusNode();
-      _initialStockValues[itemId] = currentStock;
+      _initialStockValues[itemId] = double.parse(currentStockStr);
     }
 
     // ✅ 新增：排序邏輯 (庫存不足的排在最前面，其餘依 sort_order)
@@ -436,7 +442,10 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     if (_isLoading) {
       return Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
@@ -464,7 +473,7 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
             children: [
               // 搜尋框
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 16),
                 child: TextFormField(
                   controller: _searchController,
                   decoration: _buildSearchDecoration(l10n.inventorySearchHint, context), 
@@ -520,11 +529,11 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
         color: theme.scaffoldBackgroundColor,
         padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
           child: Row(
             children: [
               CupertinoButton(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.zero,
                 child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
                 onPressed: () async {
                   final shouldPop = await _onWillPop();
@@ -563,13 +572,19 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final name = item['name'] as String;
-    final parLevelValue = (item['par_level'] as num? ?? item['low_stock_threshold'] as num? ?? 0);
-    final parLevel = parLevelValue.toStringAsFixed(0);
+    final parLevelValue = (item['par_level'] as num? ?? item['low_stock_threshold'] as num? ?? 0).toDouble();
+    final parLevel = parLevelValue % 1 == 0
+        ? parLevelValue.toInt().toString()
+        : parLevelValue.toStringAsFixed(1);
     final itemColor = isLow ? const Color(0xFFCC0000) : colorScheme.onSurface;
     final safetyColor = isLow ? const Color(0xFFCC0000) : colorScheme.onSurface;
 
+    final sw = MediaQuery.of(context).size.width;
+    final tbl = MediaQuery.of(context).size.shortestSide >= 600;
+    final hp = tbl ? (sw - 600) / 2 : 16.0;
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      margin: EdgeInsets.symmetric(horizontal: hp, vertical: 6),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       height: 75,
       decoration: BoxDecoration(
@@ -625,7 +640,7 @@ class _ViewStockCategoryDetailScreenState extends State<ViewStockCategoryDetailS
           const SizedBox(width: 10),
           CupertinoButton(
             padding: const EdgeInsets.all(4),
-            minSize: 22,
+            minimumSize: const Size(22, 22),
             onPressed: () => _onPressUpdate(item),
             child: Icon(
               CupertinoIcons.refresh,
@@ -653,11 +668,11 @@ PreferredSizeWidget _buildSimpleAppBar(BuildContext context, String title) {
       color: theme.scaffoldBackgroundColor,
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
         child: Row(
           children: [
             CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: EdgeInsets.zero,
               child: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 30),
               onPressed: () => context.pop(),
             ),
@@ -804,7 +819,7 @@ class _NoticeDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.shortestSide >= 600 ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -864,7 +879,7 @@ class _ConfirmUpdateDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.shortestSide >= 600 ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -926,7 +941,7 @@ class _UnsavedChangesDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.shortestSide >= 600 ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

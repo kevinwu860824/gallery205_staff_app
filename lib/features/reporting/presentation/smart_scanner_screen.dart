@@ -532,7 +532,7 @@ class _SmartScannerScreenState extends State<SmartScannerScreen> {
 
                 child: ElevatedButton(
 
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25))),
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.surface, foregroundColor: Theme.of(context).colorScheme.onSurface, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25))),
 
                   onPressed: () {
 
@@ -542,7 +542,7 @@ class _SmartScannerScreenState extends State<SmartScannerScreen> {
 
                   },
 
-                  child: const Text('Confirm & Save', style: TextStyle(color: Colors.black, fontSize: 18)),
+                  child: Text('Confirm & Save', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18)),
 
                 ),
 

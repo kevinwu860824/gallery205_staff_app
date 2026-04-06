@@ -150,6 +150,9 @@ class _CashFlowReportScreenState extends State<CashFlowReportScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final currencyFormat = NumberFormat('#,##0', 'en_US');
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -158,7 +161,7 @@ class _CashFlowReportScreenState extends State<CashFlowReportScreen> {
           children: [
             // --- Header (Title) ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -187,7 +190,7 @@ class _CashFlowReportScreenState extends State<CashFlowReportScreen> {
 
             // --- Month Navigator ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 10),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -218,7 +221,7 @@ class _CashFlowReportScreenState extends State<CashFlowReportScreen> {
 
             // --- Summary Cards ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8.0),
               child: Row(
                 children: [
                   // Monthly Revenue Card
@@ -289,7 +292,7 @@ class _CashFlowReportScreenState extends State<CashFlowReportScreen> {
                   : _settlements.isEmpty
                       ? Center(child: Text(l10n.cashFlowNoRecords, style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5)))) 
                       : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(horizontal: hPadding),
                           itemCount: _settlements.length,
                           itemBuilder: (context, index) {
                             final tx = _settlements[index];

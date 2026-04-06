@@ -228,6 +228,9 @@ class _CostReportScreenState extends State<CostReportScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final currencyFormat = NumberFormat('#,###', 'zh_TW');
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -236,7 +239,7 @@ class _CostReportScreenState extends State<CostReportScreen> {
           children: [
             // --- Header ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -265,7 +268,7 @@ class _CostReportScreenState extends State<CostReportScreen> {
 
             // --- Month Navigator ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 10),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -296,7 +299,7 @@ class _CostReportScreenState extends State<CostReportScreen> {
 
             // --- Total Summary Card ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8.0),
               child: Container(
                 width: double.infinity,
                 height: 118,
@@ -336,7 +339,7 @@ class _CostReportScreenState extends State<CostReportScreen> {
                   : _shiftSummaries.isEmpty
                       ? Center(child: Text(l10n.costReportNoRecords, style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5)))) 
                       : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(horizontal: hPadding),
                           itemCount: _shiftSummaries.length,
                           itemBuilder: (context, index) {
                             final summary = _shiftSummaries[index];

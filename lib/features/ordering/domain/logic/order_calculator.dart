@@ -1,5 +1,6 @@
 import '../entities/order_item.dart';
 import '../../../../core/models/tax_profile.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 class OrderPrice {
   final double subtotal;
@@ -32,7 +33,7 @@ class OrderCalculator {
       int quantity = 0;
       
       if (item is Map) {
-         if (item['status'] == 'cancelled') continue;
+         if (item['status'] == OrderingConstants.orderStatusCancelled) continue;
          
          double base = (item['price'] as num).toDouble();
          // Handle modifiers in Map if present
@@ -67,7 +68,7 @@ class OrderCalculator {
 
          quantity = (item['quantity'] as num).toInt();
       } else if (item is OrderItem) {
-         if (item.status == 'cancelled') continue;
+         if (item.status == OrderingConstants.orderStatusCancelled) continue;
          price = item.unitPriceWithModifiers; 
          quantity = item.quantity;
       }
@@ -80,13 +81,11 @@ class OrderCalculator {
 
     if (taxProfile.rate > 0) {
       if (taxProfile.isTaxIncluded) {
-        // Inclusive: Back-calculate
-        // Total = Base + Tax = Base * (1 + rate)
-        // Tax = Total - Base = Total - (Total / (1+rate))
-        taxAmount = baseForTax - (baseForTax / (1 + (taxProfile.rate / 100)));
+        // Inclusive: Back-calculate (floor per MoF convention)
+        taxAmount = (baseForTax - (baseForTax / (1 + (taxProfile.rate / 100)))).floorToDouble();
       } else {
-        // Exclusive: Add
-        taxAmount = baseForTax * (taxProfile.rate / 100);
+        // Exclusive: Add (floor per MoF convention)
+        taxAmount = (baseForTax * (taxProfile.rate / 100)).floorToDouble();
       }
     }
 

@@ -44,12 +44,16 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
   Future<void> _handleEventNavigation({
     Map<String, dynamic>? event,
     VoidCallback? onRefresh,
+    DateTime? initialDate,
   }) async {
     final bool? shouldRefresh = await context.push<bool>(
       '/eventDetail',
       extra: {
         'event': event,
         'group': event != null ? event['calendar_groups'] : null,
+        'initialYear': initialDate?.year,
+        'initialMonth': initialDate?.month,
+        'initialDay': initialDate?.day,
       },
     );
 
@@ -247,12 +251,12 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
       if (group == null) continue;
 
       bool isVisible = false;
-      if (_filterGroupValue == 0) { 
+      if (_filterGroupValue == 0) {
         isVisible = (group['name'] == '個人' || group['name'] == 'Personal') &&
             group['user_id'] == _currentUserId;
-      } else if (_filterGroupValue == 2) { 
+      } else if (_filterGroupValue == 1) {
         isVisible = _customSelectedGroupIds.contains(group['id']);
-      } else { 
+      } else {
         isVisible = true;
       }
       if (!isVisible) continue;
@@ -427,7 +431,7 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
         final isPersonal = group['name'] == '個人' || group['name'] == 'Personal';
         return isPersonal && group['user_id'] == _currentUserId;
       }
-      if (_filterGroupValue == 2) {
+      if (_filterGroupValue == 1) {
         return _customSelectedGroupIds.contains(group['id']);
       }
       return true;
@@ -483,7 +487,7 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
           height: MediaQuery.of(context).size.height * 0.6,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: Column(
             children: [
               Row(
@@ -501,6 +505,26 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
                 ],
               ),
               Divider(color: theme.dividerColor),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    child: Text(l10n.scheduleSelectAll, style: TextStyle(color: colorScheme.primary, fontSize: 14)),
+                    onPressed: () => setSheetState(() {
+                      _customSelectedGroupIds = _availableGroups.map((g) => g['id'] as String).toSet();
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    child: Text(l10n.scheduleDeselectAll, style: TextStyle(color: colorScheme.primary, fontSize: 14)),
+                    onPressed: () => setSheetState(() {
+                      _customSelectedGroupIds.clear();
+                    }),
+                  ),
+                ],
+              ),
               Expanded(
                 child: ListView.builder(
                   itemCount: _availableGroups.length,
@@ -585,12 +609,23 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
       builder: (ctx) => StatefulBuilder(builder: (context, setSheetState) {
         final events = _getEventsForDaySimple(day);
         return Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           height: 400,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Center(child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: Colors.grey[600], borderRadius: BorderRadius.circular(2)))),
-            Text(DateFormat.yMMMd(l10n.localeName).format(day) + ' ' + DateFormat.E(l10n.localeName).format(day), style: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: Text(DateFormat.yMMMd(l10n.localeName).format(day) + ' ' + DateFormat.E(l10n.localeName).format(day), style: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold))),
+                IconButton(
+                  icon: Icon(CupertinoIcons.add, color: colorScheme.primary),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _handleEventNavigation(event: null, initialDate: day);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             Expanded(child: events.isEmpty ? Center(child: Text(l10n.scheduleNoEvents, style: const TextStyle(color: Colors.grey))) : ListView.builder(itemCount: events.length, itemBuilder: (context, index) => _buildEventListCard(events[index], onRefresh: () => setSheetState(() {})))),
           ]),
         );
@@ -630,7 +665,10 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -646,7 +684,7 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
             color: theme.scaffoldBackgroundColor,
             child: Row(children: [
               Expanded(child: CupertinoSlidingSegmentedControl<int>(
@@ -654,13 +692,12 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
                 thumbColor: colorScheme.inverseSurface, // Contrast color for thumb
                 groupValue: _filterGroupValue, 
                 children: {
-                  0: Text(l10n.scheduleTabMy, style: TextStyle(color: _filterGroupValue == 0 ? colorScheme.onInverseSurface : colorScheme.onSurface)), 
-                  1: Text(l10n.scheduleTabAll, style: TextStyle(color: _filterGroupValue == 1 ? colorScheme.onInverseSurface : colorScheme.onSurface)), 
-                  2: Text(l10n.scheduleTabCustom, style: TextStyle(color: _filterGroupValue == 2 ? colorScheme.onInverseSurface : colorScheme.onSurface))
+                  0: Text(l10n.scheduleTabMy, style: TextStyle(color: _filterGroupValue == 0 ? colorScheme.onInverseSurface : colorScheme.onSurface)),
+                  1: Text(l10n.scheduleTabCustom, style: TextStyle(color: _filterGroupValue == 1 ? colorScheme.onInverseSurface : colorScheme.onSurface))
                 }, 
                 onValueChanged: (val) { if (val != null) setState(() => _filterGroupValue = val); }
               )),
-              if (_filterGroupValue == 2) ...[const SizedBox(width: 8), IconButton(icon: Icon(Icons.filter_list, color: colorScheme.primary), onPressed: _showCustomFilterDialog, tooltip: l10n.scheduleFilterTooltip)],
+              if (_filterGroupValue == 1) ...[const SizedBox(width: 8), IconButton(icon: Icon(Icons.filter_list, color: colorScheme.primary), onPressed: _showCustomFilterDialog, tooltip: l10n.scheduleFilterTooltip)],
             ]),
           ),
           _buildCustomHeader(),
@@ -833,17 +870,20 @@ class _PersonalScheduleScreenState extends State<PersonalScheduleScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     final headerText = DateFormat.yMMMM(l10n.localeName).format(_focusedDay);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        IconButton(icon: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 20), onPressed: () { setState(() => _focusedDay = DateTime(_focusedDay.year, _focusedDay.month - 1)); _loadEvents(); }),
-        const SizedBox(width: 8),
-        GestureDetector(onTap: _showMonthYearPicker, child: Row(children: [Text(headerText, style: TextStyle(color: colorScheme.onSurface, fontSize: 17, fontWeight: FontWeight.bold)), const SizedBox(width: 4), Icon(CupertinoIcons.chevron_down, color: colorScheme.onSurfaceVariant, size: 14)])),
-        const SizedBox(width: 20),
-        GestureDetector(onTap: _jumpToToday, child: Text(l10n.commonToday, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600))), // Keep white for contrast if needed, or use colorScheme
-        const SizedBox(width: 8),
-        IconButton(icon: Icon(CupertinoIcons.chevron_right, color: colorScheme.onSurface, size: 20), onPressed: () { setState(() => _focusedDay = DateTime(_focusedDay.year, _focusedDay.month + 1)); _loadEvents(); }),
+      padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(), icon: Icon(CupertinoIcons.chevron_left, color: colorScheme.onSurface, size: 20), onPressed: () { setState(() => _focusedDay = DateTime(_focusedDay.year, _focusedDay.month - 1)); _loadEvents(); }),
+        Row(children: [
+          GestureDetector(onTap: _showMonthYearPicker, child: Row(children: [Text(headerText, style: TextStyle(color: colorScheme.onSurface, fontSize: 17, fontWeight: FontWeight.bold)), const SizedBox(width: 4), Icon(CupertinoIcons.chevron_down, color: colorScheme.onSurfaceVariant, size: 14)])),
+          const SizedBox(width: 12),
+          GestureDetector(onTap: _jumpToToday, child: Text(l10n.commonToday, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600))),
+        ]),
+        IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(), icon: Icon(CupertinoIcons.chevron_right, color: colorScheme.onSurface, size: 20), onPressed: () { setState(() => _focusedDay = DateTime(_focusedDay.year, _focusedDay.month + 1)); _loadEvents(); }),
       ]),
     );
   }

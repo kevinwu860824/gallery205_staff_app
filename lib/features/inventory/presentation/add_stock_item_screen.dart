@@ -392,6 +392,9 @@ class _AddStockItemScreenState extends State<AddStockItemScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -399,7 +402,7 @@ class _AddStockItemScreenState extends State<AddStockItemScreen> {
         children: [
           // --- 內容區 (ListView) ---
           ListView(
-            padding: EdgeInsets.only(top: safeAreaTop + 80, left: 16, right: 16, bottom: 90), 
+            padding: EdgeInsets.only(top: safeAreaTop + 80, left: hPadding, right: hPadding, bottom: 90), 
             children: [
               // Product Name
               TextFormField(
@@ -637,10 +640,13 @@ class _AddEditDialogState extends State<_AddEditDialog> {
     final isEditMode = widget.initialName != null;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

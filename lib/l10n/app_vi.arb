@@ -57,6 +57,8 @@
   "scheduleTabCustom": "Tùy chỉnh",
   "scheduleFilterTooltip": "Lọc nhóm",
   "scheduleSelectGroups": "Chọn nhóm",
+  "scheduleSelectAll": "Chọn tất cả",
+  "scheduleDeselectAll": "Bỏ chọn tất cả",
   "commonDone": "Xong",
   "schedulePersonalMe": "Cá nhân",
   "scheduleUntitled": "Không tiêu đề",

@@ -110,7 +110,10 @@ class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context)!;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     if (_isLoading || _txData == null || _openData == null) {
       return Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
@@ -156,7 +159,7 @@ class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
           children: [
             // --- Header ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -193,7 +196,7 @@ class _SettlementDetailScreenState extends State<SettlementDetailScreen> {
 
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

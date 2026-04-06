@@ -1,4 +1,4 @@
-package com.example.gallery205_staff_app
+package com.caffreywu.tableOrderingApp
 
 import io.flutter.embedding.android.FlutterActivity
 

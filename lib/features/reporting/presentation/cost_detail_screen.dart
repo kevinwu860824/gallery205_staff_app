@@ -18,7 +18,7 @@ InputDecoration _buildInputDecoration(BuildContext context, {required String hin
     hintText: hintText,
     hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w500),
     filled: true,
-    fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? Theme.of(context).colorScheme.surfaceContainerHighest,
+    fillColor: Theme.of(context).scaffoldBackgroundColor,
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(25),
       borderSide: BorderSide.none,
@@ -189,7 +189,10 @@ class _CostDetailScreenState extends State<CostDetailScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     if (_isLoading) {
       return Scaffold(
         backgroundColor: theme.scaffoldBackgroundColor,
@@ -205,7 +208,7 @@ class _CostDetailScreenState extends State<CostDetailScreen> {
         child: _expenses.isEmpty
             ? Center(child: Text(l10n.costDetailNoRecords, style: TextStyle(color: colorScheme.onSurface))) 
             : ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
                 itemCount: _expenses.length,
                 itemBuilder: (context, index) {
                   final expense = _expenses[index];
@@ -461,7 +464,11 @@ class _EditCostDialogState extends State<_EditCostDialog> {
     
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 16,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -533,7 +540,11 @@ class _ConfirmDeleteDialog extends StatelessWidget {
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 40,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -622,7 +633,11 @@ class _NoticeDialog extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: MediaQuery.of(context).size.shortestSide >= 600
+            ? (MediaQuery.of(context).size.width - 480) / 2
+            : 40,
+      ),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
-import 'dart:math' as math; 
 import 'package:flutter/services.dart';
 import 'package:gallery205_staff_app/l10n/app_localizations.dart'; 
 
@@ -141,8 +140,12 @@ class _CalendarGroupSettingsScreenState extends State<CalendarGroupSettingsScree
       ),
       body: _isLoading
           ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
+          : Builder(builder: (context) {
+              final sw = MediaQuery.of(context).size.width;
+              final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+              final hPadding = isTablet ? (sw - 600) / 2 : 16.0;
+              return ListView.builder(
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               itemCount: _groups.length,
               itemBuilder: (context, index) {
                 final group = _groups[index];
@@ -185,7 +188,8 @@ class _CalendarGroupSettingsScreenState extends State<CalendarGroupSettingsScree
                   ),
                 );
               },
-            ),
+            );
+          }),
     );
   }
 }
@@ -431,7 +435,7 @@ class _GroupEditorSheetState extends State<_GroupEditorSheet> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.9,
       decoration: BoxDecoration(
@@ -442,7 +446,7 @@ class _GroupEditorSheetState extends State<_GroupEditorSheet> {
         children: [
           const SizedBox(height: 12),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.circular(2))),
-          
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             child: Row(
@@ -758,7 +762,7 @@ class _ColorEditorSheetState extends State<_ColorEditorSheet> {
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Container(
-        height: MediaQuery.of(context).size.height * 0.85, 
+        height: MediaQuery.of(context).size.height * 0.85,
         decoration: BoxDecoration(
           color: theme.cardColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -768,7 +772,7 @@ class _ColorEditorSheetState extends State<_ColorEditorSheet> {
           children: [
             const SizedBox(height: 12),
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.circular(2))),
-            
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
@@ -785,7 +789,7 @@ class _ColorEditorSheetState extends State<_ColorEditorSheet> {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
-                physics: const ClampingScrollPhysics(), 
+                physics: const ClampingScrollPhysics(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

@@ -315,6 +315,11 @@ class _PaymentMethodSettingsScreenState extends State<PaymentMethodSettingsScree
     }
 
 
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet
+        ? (MediaQuery.of(context).size.width - 600) / 2
+        : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -336,7 +341,7 @@ class _PaymentMethodSettingsScreenState extends State<PaymentMethodSettingsScree
       ),
       body: ListView(
         // [修正] 移除頂部 padding，使用標準邊距
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), 
+        padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20),
         children: [
           
           // 1. 啟用付款方式標題
@@ -519,10 +524,12 @@ class __AddMethodDialogBodyState extends State<_AddMethodDialogBody> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (MediaQuery.of(context).size.width - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         decoration: BoxDecoration(
           color: theme.cardColor, 

@@ -247,41 +247,44 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
   Future<void> _showDayPicker() async {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
-    final picked = await showDatePicker(
-      context: context,
-      locale: Locale(l10n.localeName),
-      initialDate: _targetDate,
-      firstDate: DateTime(2020, 1, 1),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      builder: (context, child) {
-        return Theme(
-          data: theme.copyWith(
-            colorScheme: theme.colorScheme.copyWith(
-              primary: theme.primaryColor,
-              onPrimary: theme.colorScheme.onPrimary,
-              surface: theme.cardColor,
-              onSurface: theme.colorScheme.onSurface,
-            ),
+    DateTime tempDate = _isDayView ? _targetDate : DateTime.now();
 
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: theme.primaryColor,
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: theme.cardColor,
+      builder: (BuildContext context) {
+        return SizedBox(
+          height: 300,
+          child: Column(
+            children: [
+              Expanded(
+                child: CupertinoTheme(
+                  data: CupertinoThemeData(brightness: theme.brightness),
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.date,
+                    initialDateTime: tempDate,
+                    minimumDate: DateTime(2020, 1, 1),
+                    maximumDate: DateTime.now().add(const Duration(days: 365)),
+                    onDateTimeChanged: (val) => tempDate = val,
+                  ),
+                ),
               ),
-            ),
+              CupertinoButton(
+                child: Text(l10n.commonConfirm, style: TextStyle(color: theme.primaryColor)),
+                onPressed: () {
+                  context.pop();
+                  setState(() {
+                    _targetDate = tempDate;
+                    _isDayView = true;
+                  });
+                  _loadReportData();
+                },
+              ),
+            ],
           ),
-          child: child!,
         );
       },
     );
-
-    if (picked != null) {
-      if (!mounted) return;
-      setState(() {
-        _targetDate = picked;
-        _isDayView = true;
-      });
-      _loadReportData();
-    }
   }
 
   void _showStaffFilter() {
@@ -598,7 +601,11 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
       context: context,
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: MediaQuery.of(context).size.shortestSide >= 600
+              ? (MediaQuery.of(context).size.width - 480) / 2
+              : 20,
+        ),
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -654,8 +661,8 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
                               height: 36,
                               child: ElevatedButton.icon(
                                 onPressed: () => _fixClockOutTime(logId, log['clock_in']),
-                                icon: const Icon(CupertinoIcons.wrench, size: 16, color: Colors.white),
-                                label: Text(l10n.clockInDetailFixButton, style: const TextStyle(color: Colors.white)),
+                                icon: Icon(CupertinoIcons.wrench, size: 16, color: theme.colorScheme.onPrimary),
+                                label: Text(l10n.clockInDetailFixButton, style: TextStyle(color: theme.colorScheme.onPrimary)),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: theme.primaryColor,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -708,6 +715,9 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -715,7 +725,7 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -748,45 +758,44 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
             ),
 
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 10),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     child: Icon(CupertinoIcons.chevron_left, color: theme.iconTheme.color, size: 32),
                     onPressed: () => _changePeriod(-1),
                   ),
-                  
-                  const SizedBox(width: 8), 
-                  
-                  GestureDetector(
-                    onTap: _showMonthPicker,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      child: Text(
-                        _isDayView 
-                            ? DateFormat.yMMMd(l10n.localeName).format(_targetDate)
-                            : DateFormat('yyyy/MM').format(_targetDate),
-                        style: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w700),
+
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: _showMonthPicker,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          child: Text(
+                            _isDayView
+                                ? '${DateFormat('M月d日').format(_targetDate)}\n${DateFormat('E', Localizations.localeOf(context).toString()).format(_targetDate)}'
+                                : DateFormat('yyyy/MM').format(_targetDate),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w700),
+                          ),
+                        ),
                       ),
-                    ),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: _showDayPicker,
+                        child: Icon(
+                          CupertinoIcons.calendar,
+                          color: colorScheme.onSurfaceVariant,
+                          size: 24,
+                        ),
+                      ),
+                    ],
                   ),
 
-                  const SizedBox(width: 4),
-
-                  CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: _showDayPicker,
-                    child: Icon(
-                      CupertinoIcons.calendar,
-                      color: colorScheme.onSurfaceVariant, 
-                      size: 24,
-                    ),
-                  ),
-                  
-                  const SizedBox(width: 8),
-                  
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     child: Icon(CupertinoIcons.chevron_right, color: theme.iconTheme.color, size: 32),
@@ -797,7 +806,7 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
             ),
 
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: theme.cardColor,
@@ -825,7 +834,7 @@ class _ClockInReportScreenState extends State<ClockInReportScreen> {
                   : _logs.isEmpty
                       ? Center(child: Text(l10n.clockInReportNoRecords, style: TextStyle(color: colorScheme.onSurfaceVariant))) 
                       : ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
                           itemCount: _logs.length,
                           itemBuilder: (context, index) {
                             final log = _logs[index];

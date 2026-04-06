@@ -86,6 +86,7 @@ class OrderItemMapper {
       menuItemId: json['item_id'] ?? '', // Menu Item ID
       itemName: json['item_name'] ?? json['name'] ?? 'Unknown',
       price: (json['price'] as num?)?.toDouble() ?? 0.0,
+      originalPrice: (json['original_price'] as num?)?.toDouble(),
       quantity: json['quantity'] ?? 1,
       selectedModifiers: json['modifiers'] != null 
           ? List<Map<String, dynamic>>.from(json['modifiers'])
@@ -125,14 +126,19 @@ class OrderContextMapper {
       buyerUbn: groupRow['buyer_ubn']?.toString(),
       paxAdult: groupRow['pax_adult'] ?? 0,
       paxChild: groupRow['pax_child'] ?? 0,
+      serviceFeeRate: (groupRow['service_fee_rate'] as num?)?.toDouble(),
+      discountAmount: (groupRow['discount_amount'] as num?)?.toDouble(),
+      note: groupRow['note'],
     );
 
-    // 2. Construct OrderContext (Operations)
+    final int paxVal = groupRow['pax'] ?? 0;
+    final int adultVal = groupRow['pax_adult'] ?? 0;
+
     return OrderContext(
       order: order,
       tableNames: List<String>.from(groupRow['table_names'] ?? []),
-      peopleCount: groupRow['pax'] ?? 0,
-      paxAdult: groupRow['pax_adult'] ?? 0,
+      peopleCount: paxVal > 0 ? paxVal : adultVal,
+      paxAdult: adultVal,
       paxChild: groupRow['pax_child'] ?? 0,
       staffName: groupRow['staff_name'] ?? '',
     );

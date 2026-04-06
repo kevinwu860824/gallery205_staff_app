@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:convert';
 import 'package:gallery205_staff_app/l10n/app_localizations.dart';
+import 'package:gallery205_staff_app/core/theme/app_theme.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
   const ChangePasswordScreen({super.key});
@@ -115,21 +116,26 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet
+        ? (MediaQuery.of(context).size.width - 600) / 2
+        : 54.0;
+
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor, 
+      backgroundColor: theme.scaffoldBackgroundColor,
       resizeToAvoidBottomInset: false, // 關閉預設鍵盤動畫
 
       appBar: AppBar(
-        title: Text(l10n.changePasswordTitle), 
+        title: Text(
+          l10n.changePasswordTitle,
+          style: AppTextStyles.homeAppBarTitle.copyWith(
+            color: colorScheme.onSurface,
+          ),
+        ),
         centerTitle: true,
         backgroundColor: theme.scaffoldBackgroundColor,
-        foregroundColor: colorScheme.onSurface, 
-        elevation: 0, 
-        titleTextStyle: TextStyle(
-          color: colorScheme.onSurface,
-          fontSize: 30,
-          fontWeight: FontWeight.w500,
-        ),
+        foregroundColor: colorScheme.onSurface,
+        elevation: 0,
       ),
       
       body: GestureDetector(
@@ -144,7 +150,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             curve: Curves.easeOut,
             
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 54.0),
+              padding: EdgeInsets.symmetric(horizontal: hPadding),
               child: Form(
                 key: _formKey,
                 child: Column(

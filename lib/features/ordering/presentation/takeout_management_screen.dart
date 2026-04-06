@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gallery205_staff_app/core/theme/app_theme.dart';
 import 'package:gallery205_staff_app/core/widgets/dark_style_dialog.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 class TakeoutManagementScreen extends ConsumerStatefulWidget {
   const TakeoutManagementScreen({super.key});
@@ -75,9 +76,9 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
           .from('order_groups')
           .select('id, created_at, status, note, payment_mode, final_amount, order_items(price, quantity, status)')
           .eq('shop_id', shopId)
-          .inFilter('status', ['dining']) // 僅抓取未結帳/進行中的訂單 (或者其他代表未完成的狀態)
-          .isFilter('table_names', null) // FIXME: Supabase 陣列若為空，檢查方式可能不同，這裡先取回過濾或考慮使用 eq('table_names', '{}')
-          .neq('status', 'merged');
+          .inFilter('status', [OrderingConstants.orderStatusDining])
+          .or('table_names.is.null,table_names.eq.{}')
+          .neq('status', OrderingConstants.orderStatusMerged);
 
       if (currentOpenId != null) {
         query = query.eq('open_id', currentOpenId);
@@ -85,18 +86,10 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
 
       final res = await query.order('created_at', ascending: true);
       final allOrders = List<Map<String, dynamic>>.from(res);
-      
-      // 在端側進一步過濾: table_names 為空陣列或為 null
-      final filtredOrders = allOrders.where((o) {
-        final tables = o['table_names'];
-        if (tables == null) return true;
-        if (tables is List && tables.isEmpty) return true;
-        return false;
-      }).toList();
 
       if (mounted) {
          setState(() {
-           _takeoutOrders = filtredOrders;
+           _takeoutOrders = allOrders;
          });
       }
     } catch (e) {
@@ -110,7 +103,7 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
       if (order['order_items'] != null) {
           final items = order['order_items'] as List;
           for (var i in items) {
-              if (i['status'] != 'cancelled') {
+              if (i['status'] != OrderingConstants.orderStatusCancelled) {
                   final p = (i['price'] as num?)?.toDouble() ?? 0.0;
                   final q = (i['quantity'] as num?)?.toInt() ?? 1;
                   total += p * q;
@@ -233,7 +226,7 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
      try {
        await Supabase.instance.client
           .from('order_groups')
-          .update({'status': 'completed'})
+          .update({'status': OrderingConstants.orderStatusCompleted})
           .eq('id', orderId);
 
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('單據已標記為完成 (已取餐)')));
@@ -330,7 +323,7 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
                              mainAxisAlignment: MainAxisAlignment.end,
                              children: [
                                // 如果是後結且未結帳(dining)
-                               if (paymentMode == '後結' && order['status'] == 'dining')
+                               if (paymentMode == '後結' && order['status'] == OrderingConstants.orderStatusDining)
                                  OutlinedButton(
                                    onPressed: () => _navigateToCheckout(orderId, total),
                                    style: OutlinedButton.styleFrom(
@@ -340,7 +333,7 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
                                    ),
                                    child: const Text('前往結帳'),
                                  ),
-                               if (paymentMode == '後結' && order['status'] == 'dining')
+                               if (paymentMode == '後結' && order['status'] == OrderingConstants.orderStatusDining)
                                  const SizedBox(width: 8),
                                
                                // 若付款完成或者先結，且餐點已做好，可標記已取餐
@@ -348,8 +341,8 @@ class _TakeoutManagementScreenState extends ConsumerState<TakeoutManagementScree
                                ElevatedButton(
                                  onPressed: () => _markOrderAsCompleted(orderId),
                                  style: ElevatedButton.styleFrom(
-                                   backgroundColor: Colors.green,
-                                   foregroundColor: Colors.white,
+                                   backgroundColor: Theme.of(context).colorScheme.primary,
+                                   foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                  ),
                                  child: const Text('已取餐 (完成)'),

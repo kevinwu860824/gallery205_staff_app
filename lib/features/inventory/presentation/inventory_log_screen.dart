@@ -190,7 +190,9 @@ child: Container(
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final safeAreaTop = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -212,7 +214,7 @@ child: Container(
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.only(top: 0, left: 16, right: 16, bottom: 20),
+        padding: EdgeInsets.only(top: 0, left: hPadding, right: hPadding, bottom: 20),
         children: [
           // 篩選工具區
           
@@ -384,8 +386,8 @@ class _LogCard extends StatelessWidget {
       // 數量變化
       TextSpan(text: '\n${l10n.inventoryLogCardLabelStock(oldStock, newStock)}'),
       
-      // 時間
-      TextSpan(text: '\n${DateFormat('HH:mm:ss').format(timestamp)}'),
+      // 日期與時間
+      TextSpan(text: '\n${DateFormat('yyyy/MM/dd HH:mm').format(timestamp)}'),
     ];
 
     return Container(

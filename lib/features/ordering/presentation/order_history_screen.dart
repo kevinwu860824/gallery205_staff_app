@@ -7,6 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gallery205_staff_app/features/ordering/data/repositories/ordering_repository_impl.dart';
 import 'package:gallery205_staff_app/features/ordering/data/datasources/ordering_remote_data_source.dart';
 import 'package:gallery205_staff_app/core/models/tax_profile.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
+import 'package:gallery205_staff_app/core/services/local_db_service.dart';
+import 'package:gallery205_staff_app/core/services/hub_client.dart';
+import 'dart:convert';
 
 class OrderHistoryScreen extends StatefulWidget {
   final bool currentShiftOnly;
@@ -68,6 +72,95 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     }
   }
 
+
+  Future<void> _runDiagnose() async {
+    debugPrint('━━━━━━━━━━ 🔍 DIAGNOSE START ━━━━━━━━━━');
+
+    // 1. 本機 SQLite 狀態
+    final localDb = LocalDbService();
+    final localGroups = await localDb.getUnsyncedOrderGroups();
+    final readyToSync = await localDb.getUnsyncedOrderGroupsWithCheckout();
+    debugPrint('[LOCAL] unsynced groups: ${localGroups.length}');
+    for (final g in localGroups) {
+      debugPrint('  group=${g['id']} status=${g['status']} is_synced=${g['is_synced']}');
+    }
+    debugPrint('[LOCAL] ready-to-sync (has checkout): ${readyToSync.where((o) => o['checkout'] != null).length}/${readyToSync.length}');
+    for (final o in readyToSync) {
+      final g = o['group'] as Map;
+      debugPrint('  group=${g['id']} status=${g['status']} is_synced=${g['is_synced']} checkout=${o['checkout'] != null}');
+    }
+
+    // 2. Hub 狀態（若已連線）
+    if (HubClient().isHubAvailable) {
+      debugPrint('[HUB] connected — calling /debug/diagnose...');
+      final result = await HubClient().get('/debug/diagnose');
+      if (result != null) {
+        final groups = result['pending_groups'] as List? ?? [];
+        final checkouts = result['pending_checkouts'] as List? ?? [];
+        final ready = result['ready_to_sync'] as List? ?? [];
+        debugPrint('[HUB] pending_groups (${groups.length}):');
+        for (final g in groups) {
+          debugPrint('  group=${g['id']} status=${g['status']} is_synced=${g['is_synced']} tables=${g['table_names']}');
+        }
+        debugPrint('[HUB] pending_checkouts (${checkouts.length}):');
+        for (final c in checkouts) {
+          debugPrint('  checkout=${c['id']} group=${c['order_group_id']} is_synced=${c['is_synced']}');
+        }
+        debugPrint('[HUB] ready_to_sync (${ready.length}):');
+        for (final r in ready) {
+          debugPrint('  group=${r['group_id']} status=${r['status']} is_synced=${r['is_synced']} has_checkout=${r['has_checkout']} items=${r['item_count']}');
+        }
+        debugPrint('[HUB] triggering /debug/run-sync...');
+        final syncResult = await HubClient().post('/debug/run-sync', {});
+        debugPrint('[HUB] run-sync result: $syncResult');
+      } else {
+        debugPrint('[HUB] /debug/diagnose returned null');
+      }
+    } else {
+      debugPrint('[HUB] not connected — skipping Hub diagnose');
+    }
+
+    debugPrint('━━━━━━━━━━ 🔍 DIAGNOSE END ━━━━━━━━━━');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('診斷完成，請查看終端機輸出')),
+      );
+    }
+  }
+
+  Future<void> _confirmClearAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除本機測試資料'),
+        content: const Text('將清空本機所有訂單、桌位快取，以及 Hub 上的資料（若已連線）。\n\n此操作無法復原，確定繼續？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('確定清除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await LocalDbService().clearAllOrderData();
+      if (HubClient().isHubAvailable) {
+        await HubClient().post('/debug/clear', {});
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已清除本機資料')),
+        );
+        _fetchHistory();
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清除失敗: $e')));
+    }
+  }
+
   Future<void> _fetchHistory() async {
     setState(() {
       isLoading = true;
@@ -82,11 +175,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           .from('order_groups')
           .select('id, tax_snapshot, table_names, final_amount, total_amount, checkout_time, created_at, status, payment_method, service_fee_rate, discount_amount, note, order_items(price, quantity, status)');
 
-      // 1. Get Open ID (if needed)
+      // 1. Get Open ID + detect Hub mode
       String? currentOpenId;
       final prefs = await SharedPreferences.getInstance();
       final shopId = prefs.getString('savedShopId');
-      
+      final isHubDevice = prefs.getBool('isHubDevice') ?? false;
+      final hubIp = prefs.getString('hubIpAddress') ?? '';
+      final isHubClient = hubIp.isNotEmpty && !isHubDevice;
+
       // Fetch Tax Profile
       try {
          final dataSource = OrderingRemoteDataSourceImpl(supabase);
@@ -95,7 +191,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       } catch(e) {
          debugPrint("Error fetching tax profile: $e");
       }
-      
+
       if (shopId != null) {
         try {
            final statusRes = await supabase.rpc('rpc_get_current_cash_status', params: {'p_shop_id': shopId}).maybeSingle();
@@ -107,80 +203,127 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         }
       }
 
+      // 2. Hub 模式：從 SQLite / Hub Server 取得進行中訂單
+      List<Map<String, dynamic>> hubActiveOrders = [];
+      if (widget.currentShiftOnly && (isHubDevice || isHubClient)) {
+        try {
+          if (isHubDevice) {
+            hubActiveOrders = await LocalDbService().getAllActivePendingOrderGroupsWithItems();
+          } else {
+            // Hub Client：從 Hub Server 取得
+            final hubClient = HubClient();
+            if (hubClient.isHubAvailable) {
+              final res = await hubClient.get('/orders/active');
+              if (res != null && res['orders'] is List) {
+                for (final raw in (res['orders'] as List)) {
+                  final map = Map<String, dynamic>.from(raw as Map);
+                  if (map['table_names'] is String) {
+                    try { map['table_names'] = jsonDecode(map['table_names'] as String); } catch (_) {}
+                  }
+                  if (map['tax_snapshot'] is String) {
+                    try { map['tax_snapshot'] = jsonDecode(map['tax_snapshot'] as String); } catch (_) {}
+                  }
+                  if (map['order_items'] is String) {
+                    try { map['order_items'] = jsonDecode(map['order_items'] as String); } catch (_) {}
+                  }
+                  hubActiveOrders.add(map);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint("Error fetching hub active orders: $e");
+        }
+      }
 
-      
       if (shopId != null) {
           queryBuilder = queryBuilder.eq('shop_id', shopId);
       }
 
-      // 2. Build Query
-       if (widget.currentShiftOnly) {
+      // 3. Build Supabase Query
+      if (widget.currentShiftOnly) {
         if (currentOpenId != null) {
            queryBuilder = queryBuilder.eq('open_id', currentOpenId);
-           queryBuilder = queryBuilder.neq('status', 'merged'); // 隱藏已併單的幽靈單
+           queryBuilder = queryBuilder.neq('status', OrderingConstants.orderStatusMerged);
            queryBuilder = queryBuilder.order('created_at', ascending: false);
+        } else if (hubActiveOrders.isNotEmpty) {
+          // Hub 模式但 Supabase 無法取得 open_id：只顯示本機進行中訂單
+          _calculateTotalsAndIds(hubActiveOrders);
+          if (mounted) setState(() { orders = hubActiveOrders; isLoading = false; });
+          return;
         } else {
-           if (mounted) setState(() { orders = []; isLoading = false; });
-           return;
+          // open_id 取得失敗，以過去24小時為 fallback 避免畫面空白
+          final cutoff = DateTime.now().subtract(const Duration(hours: 24)).toUtc();
+          queryBuilder = queryBuilder
+              .neq('status', OrderingConstants.orderStatusMerged)
+              .gte('created_at', cutoff.toIso8601String())
+              .order('created_at', ascending: false);
         }
       } else {
         // History Mode
-        queryBuilder = queryBuilder.eq('status', 'completed');
-        
-        // Filter by Shift if selected
+        queryBuilder = queryBuilder.eq('status', OrderingConstants.orderStatusCompleted);
+
         if (_selectedShiftId != null) {
            queryBuilder = queryBuilder.eq('open_id', _selectedShiftId);
         } else if (_selectedDate != null) {
-           // Filter by Date (All Shifts)
            final startOfDay = DateTime(_selectedDate!.year, _selectedDate!.month, _selectedDate!.day);
            final endOfDay = startOfDay.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
            queryBuilder = queryBuilder
                .gte('checkout_time', startOfDay.toIso8601String())
                .lte('checkout_time', endOfDay.toIso8601String());
         }
-        
+
         queryBuilder = queryBuilder.order('checkout_time', ascending: false).limit(50);
       }
 
       final res = await queryBuilder;
-      final fetchedOrders = List<Map<String, dynamic>>.from(res);
+      final supabaseOrders = List<Map<String, dynamic>>.from(res);
 
-      // 3. Calculate Totals (Only for Current Shift View)
-      if (widget.currentShiftOnly) {
-         // ... (existing logic)
-         for (var order in fetchedOrders) {
-           final isCompleted = order['status'] == 'completed';
-           final finalAmount = (order['final_amount'] as num?)?.toDouble() ?? 0.0;
-           
-           double currentAmount = 0.0;
-           if (isCompleted) {
-              currentAmount = finalAmount;
-           } else {
-              currentAmount = _calculateOrderTotal(order);
-           }
-           
-           if (isCompleted) {
-             _paidTotal += finalAmount;
-           } else if (order['status'] != 'cancelled') {
-             _unpaidTotal += currentAmount;
-           }
-         }
-         _grandTotal = _paidTotal + _unpaidTotal;
-      }
-      
-      // 4. Calculate Display IDs (Split Bill Support)
-      _calculateDisplayIds(fetchedOrders);
+      // 4. Merge：Hub 進行中 + Supabase（避免重複）
+      final hubIds = hubActiveOrders.map((o) => o['id'] as String).toSet();
+      final mergedOrders = [
+        ...hubActiveOrders,
+        ...supabaseOrders.where((o) => !hubIds.contains(o['id'] as String?)),
+      ];
 
-      if (mounted) {
-        setState(() {
-          orders = fetchedOrders;
-        });
-      }
+      // 按 created_at 降序排列
+      mergedOrders.sort((a, b) {
+        final ta = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
+        final tb = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
+        return tb.compareTo(ta);
+      });
+
+      _calculateTotalsAndIds(mergedOrders);
+
+      if (mounted) setState(() { orders = mergedOrders; });
     } catch (e) {
       debugPrint("Fetch history error: $e");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  void _calculateTotalsAndIds(List<Map<String, dynamic>> allOrders) {
+    _paidTotal = 0.0;
+    _unpaidTotal = 0.0;
+    _grandTotal = 0.0;
+
+    if (widget.currentShiftOnly) {
+      for (var order in allOrders) {
+        final isCompleted = order['status'] == OrderingConstants.orderStatusCompleted;
+        final finalAmount = (order['final_amount'] as num?)?.toDouble() ?? 0.0;
+        final currentAmount = isCompleted ? finalAmount : _calculateOrderTotal(order);
+
+        if (isCompleted) {
+          _paidTotal += finalAmount;
+        } else if (order['status'] != OrderingConstants.orderStatusCancelled) {
+          _unpaidTotal += currentAmount;
+        }
+      }
+      _grandTotal = _paidTotal + _unpaidTotal;
+    }
+
+    _calculateDisplayIds(allOrders);
   }
 
   void _calculateDisplayIds(List<Map<String, dynamic>> allOrders) {
@@ -238,7 +381,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       if (order['order_items'] != null) {
           final items = order['order_items'] as List;
           for (var i in items) {
-              if (i['status'] != 'cancelled') {
+              if (i['status'] != OrderingConstants.orderStatusCancelled) {
                   final p = (i['price'] as num?)?.toDouble() ?? 0.0;
                   final q = (i['quantity'] as num?)?.toInt() ?? 1;
                   itemSubtotal += p * q;
@@ -267,17 +410,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(widget.currentShiftOnly ? "本班次交易紀錄" : "過往交易紀錄"),
-        backgroundColor: theme.cardColor,
+        backgroundColor: theme.scaffoldBackgroundColor,
         leading: IconButton(
           icon: const Icon(CupertinoIcons.back),
           onPressed: () => context.pop(),
         ),
-        actions: !widget.currentShiftOnly ? [
+        actions: widget.currentShiftOnly ? [] : [
           // Shift Dropdown
           if (_shifts.isNotEmpty)
             DropdownButtonHideUnderline(
@@ -328,19 +474,19 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             },
           ),
           const SizedBox(width: 8),
-        ] : null,
+        ],
       ),
       body: isLoading 
         ? const Center(child: CupertinoActivityIndicator())
         : Column(
             children: [
-              if (widget.currentShiftOnly) _buildSummaryHeader(theme),
-              if (widget.currentShiftOnly) _buildListHeader(theme),
+              if (widget.currentShiftOnly) _buildSummaryHeader(theme, hPadding),
+              if (widget.currentShiftOnly) _buildListHeader(theme, hPadding),
               Expanded(
-                child: orders.isEmpty 
+                child: orders.isEmpty
                   ? Center(child: Text("尚無交易紀錄", style: TextStyle(color: colorScheme.onSurface)))
                   : ListView.separated(
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
                       itemCount: orders.length,
                       separatorBuilder: (c, i) => const Divider(),
                       itemBuilder: (context, index) {
@@ -357,9 +503,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     );
   }
 
-  Widget _buildSummaryHeader(ThemeData theme) {
+  Widget _buildSummaryHeader(ThemeData theme, double hPadding) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      padding: EdgeInsets.symmetric(vertical: 20, horizontal: hPadding),
       decoration: BoxDecoration(
         color: theme.cardColor,
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
@@ -385,10 +531,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     );
   }
 
-  Widget _buildListHeader(ThemeData theme) {
+  Widget _buildListHeader(ThemeData theme, double hPadding) {
     final style = TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13, fontWeight: FontWeight.bold);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
       child: Row(
         children: [
           Expanded(flex: 3, child: Text("時間", style: style)),
@@ -417,8 +563,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     final displayTable = tables.isNotEmpty ? tables : "-";
 
     final status = order['status'] ?? 'unknown';
-    final isCompleted = status == 'completed';
-    final isCancelled = status == 'cancelled';
+    final isCompleted = status == OrderingConstants.orderStatusCompleted;
+    final isCancelled = status == OrderingConstants.orderStatusCancelled;
     
     String displayStatus;
     Color statusColor;

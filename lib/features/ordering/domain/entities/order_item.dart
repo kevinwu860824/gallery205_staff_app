@@ -9,9 +9,10 @@ class OrderItem extends Equatable {
   final String note;
   final List<String> targetPrintCategoryIds;
   final String status;
-  
+  final double? originalPrice; // Non-null when item is treated (招待)
+
   // NEW: List of selected modifiers
-  final List<Map<String, dynamic>> selectedModifiers; 
+  final List<Map<String, dynamic>> selectedModifiers;
   final DateTime? updatedAt;
   final String printStatus;
 
@@ -24,6 +25,7 @@ class OrderItem extends Equatable {
     this.note = '',
     this.targetPrintCategoryIds = const [],
     this.status = 'submitted',
+    this.originalPrice,
     this.selectedModifiers = const [],
     this.updatedAt,
     this.printStatus = 'pending',
@@ -42,7 +44,7 @@ class OrderItem extends Equatable {
   double get totalPrice => unitPriceWithModifiers * quantity;
 
   @override
-  List<Object?> get props => [id, menuItemId, itemName, quantity, price, note, targetPrintCategoryIds, status, selectedModifiers, updatedAt, printStatus];
+  List<Object?> get props => [id, menuItemId, itemName, quantity, price, note, targetPrintCategoryIds, status, originalPrice, selectedModifiers, updatedAt, printStatus];
   
   OrderItem copyWith({
     String? id,
@@ -53,6 +55,7 @@ class OrderItem extends Equatable {
     String? note,
     List<String>? targetPrintCategoryIds,
     String? status,
+    double? originalPrice,
     List<Map<String, dynamic>>? selectedModifiers,
     DateTime? updatedAt,
     String? printStatus,
@@ -66,6 +69,7 @@ class OrderItem extends Equatable {
       note: note ?? this.note,
       targetPrintCategoryIds: targetPrintCategoryIds ?? this.targetPrintCategoryIds,
       status: status ?? this.status,
+      originalPrice: originalPrice ?? this.originalPrice,
       selectedModifiers: selectedModifiers ?? this.selectedModifiers,
       updatedAt: updatedAt ?? this.updatedAt,
       printStatus: printStatus ?? this.printStatus,

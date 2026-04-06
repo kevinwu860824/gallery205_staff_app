@@ -11,6 +11,7 @@ import 'package:gallery205_staff_app/core/events/order_events.dart';
 import 'package:gallery205_staff_app/core/services/invoice_service.dart';
 import 'package:gallery205_staff_app/core/services/printer_service.dart';
 import 'package:gallery205_staff_app/features/inventory/presentation/providers/inventory_providers.dart' hide supabaseClientProvider; // NEW & Hide conflict
+import 'package:gallery205_staff_app/core/services/hub_client.dart';
 // --- Data Layer Providers ---
 
 final orderingRemoteDataSourceProvider = Provider<OrderingRemoteDataSource>((ref) {
@@ -59,8 +60,9 @@ final orderingRepositoryProvider = Provider<OrderingRepository>((ref) {
   return OrderingRepositoryImpl(
     ref.watch(orderingRemoteDataSourceProvider),
     ref.watch(sharedPreferencesProvider),
-    ref.watch(orderEventBusProvider), // Inject Bus
-    ref.watch(inventoryRepositoryProvider), // Inject Inventory Repo
+    ref.watch(orderEventBusProvider),
+    ref.watch(inventoryRepositoryProvider),
+    ref.watch(hubClientProvider),
   );
 });
 
@@ -98,6 +100,14 @@ class CartNotifier extends StateNotifier<List<OrderItem>> {
     if (index >= 0 && index < state.length) {
       final newState = [...state];
       newState.removeAt(index);
+      state = newState;
+    }
+  }
+
+  void updateItem(int index, OrderItem item) {
+    if (index >= 0 && index < state.length) {
+      final newState = [...state];
+      newState[index] = item;
       state = newState;
     }
   }

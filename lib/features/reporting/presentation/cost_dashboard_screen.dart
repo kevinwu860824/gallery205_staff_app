@@ -261,7 +261,10 @@ class _CostDashboardScreenState extends State<CostDashboardScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
@@ -269,7 +272,7 @@ class _CostDashboardScreenState extends State<CostDashboardScreen> {
           children: [
             // --- Header ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
               child: Row(
                 children: [
                   CupertinoButton(
@@ -303,7 +306,7 @@ class _CostDashboardScreenState extends State<CostDashboardScreen> {
 
             // --- Month Navigator ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -336,103 +339,135 @@ class _CostDashboardScreenState extends State<CostDashboardScreen> {
             Expanded(
               child: _isLoading
                   ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      child: Column(
-                        children: [
-                          // 1. 核心指標 (GridView)
-                          GridView.count(
-                            crossAxisCount: 2,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            childAspectRatio: 1.4, 
-                            children: [
-                              _KpiCard(title: l10n.dashboardTotalRevenue, value: _totalRevenue), 
-                              _KpiCard(title: l10n.dashboardCogs, value: _cogs), 
-                              _KpiCard(title: l10n.dashboardGrossProfit, value: _grossProfit), 
-                              // ✅ 毛利率 (顯示 %)
-                              _KpiCard(title: l10n.dashboardGrossMargin, value: _grossMargin, isPercentage: true), 
-                              
-                              _KpiCard(title: l10n.dashboardOpex, value: _opex), 
-                              _KpiCard(title: l10n.dashboardOpIncome, value: _opIncome), 
-                              _KpiCard(title: l10n.dashboardNetIncome, value: _netIncome), 
-                              // ✅ 淨利率 (顯示 %)
-                              _KpiCard(title: l10n.dashboardNetProfitMargin, value: _netMargin, isPercentage: true), 
-                            ],
-                          ),
-
-                          const SizedBox(height: 30),
-
-                          // 2. 圓餅圖
-                          SizedBox(
-                            height: 300,
-                            child: _pieChartData.isEmpty
-                                ? Center(child: Text(l10n.dashboardNoCostData, style: const TextStyle(color: Colors.grey))) 
-                                : PieChart(
-                                    PieChartData(
-                                      sectionsSpace: 0,
-                                      centerSpaceRadius: 70,
-                                      sections: List.generate(_pieChartData.length, (i) {
-                                        final data = _pieChartData[i];
-                                        final amount = data['amount'] as double;
-                                        final total = _cogs + _opex;
-                                        final percentage = total == 0 ? 0 : (amount / total) * 100;
-                                        
-                                        return PieChartSectionData(
-                                          color: _pieColors[i % _pieColors.length],
-                                          value: amount,
-                                          title: '${percentage.toStringAsFixed(0)}%',
-                                          radius: 60,
-                                          titleStyle: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        );
-                                      }),
-                                    ),
-                                  ),
-                          ),
-                          
-                          // 3. 圓餅圖圖例
-                          const SizedBox(height: 20),
-                          if (_pieChartData.isNotEmpty)
-                             Wrap(
-                               spacing: 16,
-                               runSpacing: 8,
-                               alignment: WrapAlignment.center,
-                               children: List.generate(_pieChartData.length, (i) {
-                                  final data = _pieChartData[i];
-                                  return Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 12, height: 12,
-                                        decoration: BoxDecoration(
-                                          color: _pieColors[i % _pieColors.length],
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        data['category'],
-                                        style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
-                                      ),
-                                    ],
-                                  );
-                               }),
-                             ),
-                          
-                          const SizedBox(height: 50),
-                        ],
-                      ),
-                    ),
+                  : isTablet
+                      ? _buildTabletContent(context, l10n, theme, colorScheme)
+                      : _buildPhoneContent(context, l10n, colorScheme),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // ---- 手機版：垂直佈局 ----
+  Widget _buildPhoneContent(BuildContext context, AppLocalizations l10n, ColorScheme colorScheme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Column(
+        children: [
+          _buildKpiGrid(l10n, 2),
+          const SizedBox(height: 30),
+          _buildPieChart(l10n, colorScheme, height: 300),
+          const SizedBox(height: 20),
+          _buildLegend(colorScheme),
+          const SizedBox(height: 50),
+        ],
+      ),
+    );
+  }
+
+  // ---- iPad 版：左數據右圓餅圖 ----
+  Widget _buildTabletContent(BuildContext context, AppLocalizations l10n, ThemeData theme, ColorScheme colorScheme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 左：KPI 2×4 grid
+          Expanded(
+            child: _buildKpiGrid(l10n, 2),
+          ),
+          const SizedBox(width: 24),
+          // 右：圓餅圖＋圖例
+          Expanded(
+            child: Column(
+              children: [
+                _buildPieChart(l10n, colorScheme, height: 480),
+                const SizedBox(height: 20),
+                _buildLegend(colorScheme),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKpiGrid(AppLocalizations l10n, int columns) {
+    return GridView.count(
+      crossAxisCount: columns,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 2.0,
+      children: [
+        _KpiCard(title: l10n.dashboardTotalRevenue, value: _totalRevenue),
+        _KpiCard(title: l10n.dashboardCogs, value: _cogs),
+        _KpiCard(title: l10n.dashboardGrossProfit, value: _grossProfit),
+        _KpiCard(title: l10n.dashboardGrossMargin, value: _grossMargin, isPercentage: true),
+        _KpiCard(title: l10n.dashboardOpex, value: _opex),
+        _KpiCard(title: l10n.dashboardOpIncome, value: _opIncome),
+        _KpiCard(title: l10n.dashboardNetIncome, value: _netIncome),
+        _KpiCard(title: l10n.dashboardNetProfitMargin, value: _netMargin, isPercentage: true),
+      ],
+    );
+  }
+
+  Widget _buildPieChart(AppLocalizations l10n, ColorScheme colorScheme, {required double height}) {
+    return SizedBox(
+      height: height,
+      child: _pieChartData.isEmpty
+          ? Center(child: Text(l10n.dashboardNoCostData, style: const TextStyle(color: Colors.grey)))
+          : PieChart(
+              PieChartData(
+                sectionsSpace: 0,
+                centerSpaceRadius: MediaQuery.of(context).size.shortestSide >= 600 ? 100 : 70,
+                sections: List.generate(_pieChartData.length, (i) {
+                  final data = _pieChartData[i];
+                  final amount = data['amount'] as double;
+                  final total = _cogs + _opex;
+                  final percentage = total == 0 ? 0 : (amount / total) * 100;
+                  return PieChartSectionData(
+                    color: _pieColors[i % _pieColors.length],
+                    value: amount,
+                    title: '${percentage.toStringAsFixed(0)}%',
+                    radius: MediaQuery.of(context).size.shortestSide >= 600 ? 90 : 60,
+                    titleStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  );
+                }),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildLegend(ColorScheme colorScheme) {
+    if (_pieChartData.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      alignment: WrapAlignment.center,
+      children: List.generate(_pieChartData.length, (i) {
+        final data = _pieChartData[i];
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 12, height: 12,
+              decoration: BoxDecoration(
+                color: _pieColors[i % _pieColors.length],
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(data['category'], style: TextStyle(color: colorScheme.onSurface, fontSize: 12)),
+          ],
+        );
+      }),
     );
   }
 }
@@ -466,10 +501,10 @@ class _KpiCard extends StatelessWidget {
     }
     
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: theme.cardColor,
-        borderRadius: BorderRadius.circular(25),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -479,17 +514,17 @@ class _KpiCard extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               color: colorScheme.onSurface,
-              fontSize: 14,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
-            displayValue, 
+            displayValue,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: colorScheme.onSurface,
-              fontSize: 22,
+              fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
           ),

@@ -42,8 +42,14 @@ class LanguageSettingsScreen extends StatelessWidget {
         elevation: 0,
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
+        child: Builder(
+          builder: (context) {
+            final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+            final double hPadding = isTablet
+                ? (MediaQuery.of(context).size.width - 600) / 2
+                : 16.0;
+            return Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16.0),
           child: Container(
             decoration: BoxDecoration(
               color: theme.cardColor,
@@ -128,6 +134,8 @@ class LanguageSettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          );
+          },
         ),
       ),
     );

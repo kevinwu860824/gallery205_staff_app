@@ -11,15 +11,18 @@ import 'package:gallery205_staff_app/l10n/app_localizations.dart';
 // 🔥 記得 import 這兩個新檔案
 import 'package:gallery205_staff_app/features/schedule/presentation/recurrence_picker.dart';
 import 'package:gallery205_staff_app/core/models/recurrence_rule.dart';
+import 'package:gallery205_staff_app/core/services/widget_session_service.dart';
 
 class EventDetailScreen extends StatefulWidget {
   final Map<String, dynamic>? event;
   final Map<String, dynamic>? group;
+  final DateTime? initialDate;
 
   const EventDetailScreen({
     super.key,
     this.event,
     this.group,
+    this.initialDate,
   });
 
   @override
@@ -154,8 +157,15 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
     } else {
       final now = DateTime.now();
-      _startTime = now.add(const Duration(hours: 1)).copyWith(minute: 0, second: 0); 
-      _endTime = _startTime.add(const Duration(hours: 1));
+      if (widget.initialDate != null) {
+        final d = widget.initialDate!;
+        _startTime = DateTime(d.year, d.month, d.day, 9, 0);
+        _endTime = DateTime(d.year, d.month, d.day, 10, 0);
+      } else {
+        final nextHour = (now.hour + 1).clamp(0, 23);
+        _startTime = DateTime(now.year, now.month, now.day, nextHour, 0);
+        _endTime = _startTime.add(const Duration(hours: 1));
+      }
       _selectedGroupId = widget.group?['id'];
       if (_currentUserId != null) {
         _selectedUserIds = [_currentUserId!];
@@ -374,6 +384,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
         );
       }
 
+      await WidgetSessionService.reloadWidget();
+
       if (mounted) {
         context.pop(true); 
       }
@@ -408,6 +420,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
         await supabase.from('calendar_events').delete().eq('id', widget.event!['id']);
         
+        await WidgetSessionService.reloadWidget();
+
         if (mounted) context.pop(true);
       } catch (e) {
         debugPrint('Delete Error: $e');
@@ -432,6 +446,9 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     final relatedCount = _selectedUserIds.length;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     
     // 顯示複雜規則的文字
     String repeatLabel = _recurrenceRule != null ? _recurrenceRule.toString() : 'None';
@@ -472,7 +489,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       body: _isLoading
           ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               children: [
                 Container(
                   padding: const EdgeInsets.all(20),
@@ -569,6 +586,9 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   Widget _buildEditUI(AppLocalizations l10n, bool isNewEvent) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
     
     // 顯示文字
     String repeatLabel = _recurrenceRule != null ? _recurrenceRule.toString() : 'None';
@@ -608,7 +628,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       body: _isLoading
           ? Center(child: CupertinoActivityIndicator(color: colorScheme.onSurface))
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 16),
               children: [
                 _buildSection([
                   CupertinoTextField(
@@ -957,33 +977,57 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
   void _showGroupPicker() {
     final l10n = AppLocalizations.of(context)!;
-    showCupertinoModalPopup(
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showModalBottomSheet(
       context: context,
-      builder: (_) => CupertinoActionSheet(
-        title: Text(l10n.eventDetailSelectGroup),
-        actions: _groups.map((g) => CupertinoActionSheetAction(
-          onPressed: () {
-            setState(() {
-              _selectedGroupId = g['id'];
-              _selectedEventColor = null; 
-              _availableEventColors = [];
-            });
-            _loadGroupColors(g['id']);
-            Navigator.pop(context);
-          },
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(width: 10, height: 10, decoration: BoxDecoration(color: _hexToColor(g['color']), shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Text(g['name'] == '個人' ? l10n.commonPersonalMe : g['name']),
-            ],
-          ),
-        )).toList(),
-        cancelButton: CupertinoActionSheetAction(
-          isDestructiveAction: true,
-          onPressed: () => Navigator.pop(context),
-          child: Text(l10n.commonCancel),
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(l10n.eventDetailSelectGroup, style: TextStyle(color: colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    child: Text(l10n.commonCancel, style: const TextStyle(color: Colors.grey)),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: theme.dividerColor, height: 1),
+            ..._groups.map((g) => ListTile(
+              leading: Container(
+                width: 16, height: 16,
+                decoration: BoxDecoration(color: _hexToColor(g['color']), shape: BoxShape.circle),
+              ),
+              title: Text(
+                g['name'] == '個人' ? l10n.commonPersonalMe : g['name'],
+                style: TextStyle(color: colorScheme.onSurface),
+              ),
+              trailing: _selectedGroupId == g['id'] ? Icon(Icons.check, color: colorScheme.primary) : null,
+              onTap: () {
+                setState(() {
+                  _selectedGroupId = g['id'];
+                  _selectedEventColor = null;
+                  _availableEventColors = [];
+                });
+                _loadGroupColors(g['id']);
+                Navigator.pop(context);
+              },
+            )),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -994,7 +1038,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     final groupDefaultColor = _findGroupDefaultColor(_selectedGroupId);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1069,7 +1113,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     final l10n = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,

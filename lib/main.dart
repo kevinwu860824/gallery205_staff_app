@@ -16,6 +16,11 @@ import 'package:gallery205_staff_app/features/auth/presentation/providers/auth_p
 import 'package:gallery205_staff_app/core/providers/theme_provider.dart';
 import 'package:gallery205_staff_app/core/theme/app_theme.dart';
 import 'package:gallery205_staff_app/features/ordering/presentation/providers/ordering_providers.dart'; // NEW
+import 'package:gallery205_staff_app/core/providers/connectivity_provider.dart';
+import 'package:gallery205_staff_app/core/widgets/offline_banner.dart';
+import 'package:gallery205_staff_app/core/services/hub_client.dart';
+import 'package:gallery205_staff_app/core/services/hub_server.dart';
+import 'package:gallery205_staff_app/core/constants/app_constants.dart';
 
 Future<void> main() async {
   await BootstrapService.init();
@@ -75,14 +80,65 @@ class MyApp extends ConsumerStatefulWidget {
   ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends ConsumerState<MyApp> {
+class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   Locale? _locale;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSavedLanguage();
     // Note: Listener is moved to build() for Riverpod
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initHubServices());
+  }
+
+  Future<void> _initHubServices() async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    final isHub = prefs.getBool(AppConstants.keyIsHubDevice) ?? false;
+    if (isHub) {
+      final server = ref.read(hubServerProvider);
+      server.onOrderChanged = () {
+        ref.read(orderingRepositoryProvider).syncOfflineOrders();
+      };
+      server.onSyncRequested = () async {
+        await ref.read(orderingRepositoryProvider).syncOfflineOrders();
+      };
+      await server.start();
+    } else {
+      HubClient().init((available) {
+        if (mounted) {
+          ref.read(hubAvailableProvider.notifier).state = available;
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// App 從背景回到前景時，觸發離線訂單同步 + Hub Server 重啟
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('📱 App resumed — checking offline sync');
+      ref.read(orderingRepositoryProvider).syncOfflineOrders();
+
+      final prefs = ref.read(sharedPreferencesProvider);
+      final isHub = prefs.getBool(AppConstants.keyIsHubDevice) ?? false;
+      if (isHub) {
+        final server = ref.read(hubServerProvider);
+        server.onOrderChanged ??= () {
+          ref.read(orderingRepositoryProvider).syncOfflineOrders();
+        };
+        if (!server.isRunning) {
+          server.start();
+          debugPrint('🔄 Hub server restarted on resume');
+        }
+      }
+    }
   }
 
   Future<void> _loadSavedLanguage() async {
@@ -114,6 +170,16 @@ class _MyAppState extends ConsumerState<MyApp> {
     ref.watch(kitchenTicketServiceProvider);
     ref.watch(invoiceServiceProvider);
 
+    // 監聽網路狀態：斷線 → 上線時自動觸發離線訂單同步
+    ref.listen(isOnlineProvider, (previous, next) {
+      final wasOffline = previous?.value == false;
+      final nowOnline = next.value == true;
+      if (wasOffline && nowOnline) {
+        debugPrint('🌐 Network restored — syncing offline orders');
+        ref.read(orderingRepositoryProvider).syncOfflineOrders();
+      }
+    });
+
     final appThemeMode = ref.watch(themeProvider);
 
     ThemeData lightThemeToUse;
@@ -140,7 +206,7 @@ class _MyAppState extends ConsumerState<MyApp> {
       locale: _locale,
       onGenerateTitle: (context) =>
           AppLocalizations.of(context)?.homeTitle ?? 'Gallery 20.5',
-      
+
       // --- Theme Configuration ---
       themeMode: flutterThemeMode,
       theme: lightThemeToUse,
@@ -149,13 +215,23 @@ class _MyAppState extends ConsumerState<MyApp> {
 
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: const [
-        Locale('en', ''),                                      
-        Locale('it', ''),                                      
-        Locale('zh', ''),                                      
-        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'), 
-        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'), 
+        Locale('en', ''),
+        Locale('it', ''),
+        Locale('zh', ''),
+        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
+        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
         Locale('vi', ''),
       ],
+
+      // 全域狀態 Banner：疊在所有畫面頂部
+      builder: (context, child) {
+        return Column(
+          children: [
+            const OfflineBanner(),
+            Expanded(child: child ?? const SizedBox()),
+          ],
+        );
+      },
     );
   }
 }

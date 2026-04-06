@@ -38,8 +38,15 @@ class SettingsCategoryScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+          child: Builder(
+            builder: (context) {
+              final shortestSide = MediaQuery.of(context).size.shortestSide;
+              final isTablet = shortestSide >= 600;
+              final double hPadding = isTablet
+                  ? (MediaQuery.of(context).size.width - 600) / 2
+                  : 16.0;
+              return Padding(
+            padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 20.0),
             child: Container(
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
@@ -64,6 +71,8 @@ class SettingsCategoryScreen extends ConsumerWidget {
                 ),
               ),
             ),
+            );
+            },
           ),
         ),
       ),

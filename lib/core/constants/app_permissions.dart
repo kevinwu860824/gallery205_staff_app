@@ -44,7 +44,8 @@ class AppPermissions {
   static const String setCostCat = 'set_cost_cat';      
   static const String setInv = 'set_inv';               
   static const String setCashReg = 'set_cash_reg';      
-  static const String setCalGroup = 'set_cal_group';    
+  static const String setCalGroup = 'set_cal_group';
+  static const String setHub = 'set_hub';
 
   // [保留舊 Key 防止報錯]
   static const String inventoryView = 'inventory_view';
@@ -111,6 +112,7 @@ class AppPermissions {
         {'key': setCostCat, 'label': 'permSetCostCat'},
         {'key': setInv, 'label': 'permSetInv'},
         {'key': setCashReg, 'label': 'permSetCashReg'},
+        {'key': setHub, 'label': 'permSetHub'},
       ]
     },
   ];

@@ -78,6 +78,7 @@ class _EditStockListScreenState extends State<EditStockListScreen> {
     _loadCategories();
   }
 
+
   Future<void> _loadCategories() async {
     final prefs = await SharedPreferences.getInstance();
     shopId = prefs.getString('savedShopId');
@@ -184,16 +185,19 @@ class _EditStockListScreenState extends State<EditStockListScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
     final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     final colorScheme = Theme.of(context).colorScheme;
-    
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           // --- 內容區 (ListView) ---
           ListView(
-            padding: EdgeInsets.only(top: safeAreaTop + 60, left: 16, right: 16, bottom: 40), 
+            padding: EdgeInsets.only(top: safeAreaTop + 60, left: hPadding, right: hPadding, bottom: 40), 
             children: [
               Container(
                 decoration: BoxDecoration(
@@ -431,7 +435,7 @@ class _EditStockCategoryDetailScreenState extends State<EditStockCategoryDetailS
         isEditing: false,
       ),
     );
-    
+
     if (result != null) {
       final newItem = {
         ...result,
@@ -454,16 +458,19 @@ class _EditStockCategoryDetailScreenState extends State<EditStockCategoryDetailS
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
     final safeAreaTop = MediaQuery.of(context).padding.top;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double hPadding = isTablet ? (screenWidth - 600) / 2 : 16.0;
+
     final colorScheme = Theme.of(context).colorScheme;
-    
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           // --- 內容區 (ListView) ---
           ListView(
-            padding: EdgeInsets.only(top: safeAreaTop + 60, left: 16, right: 16, bottom: 40), 
+            padding: EdgeInsets.only(top: safeAreaTop + 60, left: hPadding, right: hPadding, bottom: 40), 
             children: [
               Container(
                 decoration: BoxDecoration(
@@ -740,10 +747,13 @@ class _AddEditDialogState extends State<_AddEditDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
     final isEditMode = widget.initialName != null;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -761,7 +771,17 @@ class _AddEditDialogState extends State<_AddEditDialog> {
             
             TextFormField(
               controller: controller,
-              decoration: _buildInputDecoration(hintText: widget.hintText, context: context),
+              decoration: InputDecoration(
+                hintText: widget.hintText,
+                hintStyle: const TextStyle(color: Colors.grey, fontSize: 16),
+                filled: true,
+                fillColor: Theme.of(context).scaffoldBackgroundColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(25),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+              ),
               style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
             ),
             const SizedBox(height: 30),
@@ -810,15 +830,18 @@ class _DeleteDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
-        height: 183, 
+        height: 183,
         decoration: BoxDecoration(
-          color: Theme.of(context).cardColor, 
-          borderRadius: BorderRadius.circular(25), 
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(25),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -946,9 +969,12 @@ class _AddEditStockItemDialogState extends State<_AddEditStockItemDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!; // [新增]
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final double dialogHPadding = isTablet ? (screenWidth - 480) / 2 : 40.0;
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+      insetPadding: EdgeInsets.symmetric(horizontal: dialogHPadding),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

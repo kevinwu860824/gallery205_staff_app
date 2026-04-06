@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:gallery205_staff_app/features/ordering/data/models/ordering_models.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_group.dart';
 import 'package:gallery205_staff_app/features/ordering/domain/entities/order_item.dart';
 import 'package:gallery205_staff_app/core/services/printer_service.dart';
+import 'package:gallery205_staff_app/features/ordering/domain/ordering_constants.dart';
 
 abstract class OrderingRemoteDataSource {
   Future<List<MenuCategoryModel>> getMenuCategories(String shopId);
@@ -28,9 +30,53 @@ abstract class OrderingRemoteDataSource {
   /// Updates print status for multiple items.
   Future<void> updatePrintStatus(List<String> itemIds, String status);
 
+  /// Updates print_jobs JSON per item. Map<itemId, print_jobs object>
+  Future<void> updatePrintJobs(Map<String, Map<String, dynamic>> itemPrintJobs);
+
+  /// 把超過 [thresholdMinutes] 分鐘仍是 pending 的品項標為 failed
+  Future<void> cleanupStalePendingItems(String shopId, {int thresholdMinutes = 2});
+
   Future<List<Map<String, dynamic>>> fetchFailedPrintItems(String shopId);
 
   Future<List<Map<String, dynamic>>> getShifts(String shopId, String date);
+
+  Future<void> splitOrderGroup({
+    required String sourceGroupId,
+    required Map<String, int> itemQuantitiesToMove,
+    required List<String> targetTableNames,
+    String? existingTargetGroupId,
+  });
+
+  Future<void> revertSplit({
+    required String sourceGroupId,
+    required String targetGroupId,
+  });
+
+  Future<void> updateBillingInfo({
+    required String orderGroupId,
+    required double serviceFeeRate,
+    required double discountAmount,
+    required double finalAmount,
+  });
+
+  Future<void> moveTable({
+    required String hostGroupId,
+    required List<String> oldTables,
+    required List<String> newTables,
+    int? colorIndex,
+  });
+
+  Future<void> mergeOrderGroups({
+    required String hostGroupId,
+    required List<String> targetGroupIds,
+    int? colorIndex,
+  });
+
+  Future<void> unmergeOrderGroups({
+    required String hostGroupId,
+    required List<String> targetGroupIds,
+    Map<String, String>? tableOverrides,
+  });
 
   SupabaseClient get supabaseClient;
 }
@@ -48,47 +94,69 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
   }
 
   @override
+  Future<void> updatePrintJobs(Map<String, Map<String, dynamic>> itemPrintJobs) async {
+    if (itemPrintJobs.isEmpty) return;
+    await Future.wait(itemPrintJobs.entries.map((entry) async {
+      await supabaseClient
+          .from('order_items')
+          .update({'print_jobs': entry.value})
+          .eq('id', entry.key);
+    }));
+  }
+
+  @override
+  Future<void> cleanupStalePendingItems(String shopId, {int thresholdMinutes = 2}) async {
+    try {
+      // 1. 取出這個店所有進行中的 order_group IDs
+      final groupRes = await supabaseClient
+          .from('order_groups')
+          .select('id')
+          .eq('shop_id', shopId)
+          .neq('status', OrderingConstants.orderStatusCancelled);
+      final groupIds = (groupRes as List).map((r) => r['id'] as String).toList();
+      if (groupIds.isEmpty) return;
+
+      // 2. 把超過 thresholdMinutes 分鐘仍是 pending 的品項標為 failed
+      final threshold = DateTime.now()
+          .subtract(Duration(minutes: thresholdMinutes))
+          .toUtc()
+          .toIso8601String();
+      // .inFilter() on UPDATE causes 400 in some PostgREST versions;
+      // use explicit filter string instead
+      final inClause = groupIds.map((id) => '"$id"').join(',');
+      await supabaseClient
+          .from('order_items')
+          .update({'print_status': 'failed'})
+          .eq('print_status', 'pending')
+          .lt('created_at', threshold)
+          .filter('order_group_id', 'in', '($inClause)');
+    } catch (e) {
+      debugPrint('cleanupStalePendingItems error: $e');
+    }
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> fetchFailedPrintItems(String shopId) async {
     try {
       final res = await supabaseClient
           .from('order_items')
-          .select('*, order_groups!inner(table_names, status, shop_id)') 
+          .select('*, order_groups!inner(table_names, status, shop_id)')
           .eq('order_groups.shop_id', shopId)
-          .neq('order_groups.status', 'cancelled') 
-          .inFilter('print_status', ['pending', 'failed'])
+          .neq('order_groups.status', OrderingConstants.orderStatusCancelled)
+          .eq('print_status', 'failed')
           .order('created_at', ascending: false)
-          .limit(50); // Safety limit
+          .limit(50);
 
       return (res as List).map((row) {
         final group = row['order_groups'];
         final tableNames = List<String>.from(group['table_names'] ?? []);
-        final tableName = tableNames.join(',');
-        
         return {
           'item': OrderItemMapper.fromJson(row),
-          'tableName': tableName,
+          'tableName': tableNames.join(','),
           'orderGroupId': row['order_group_id'],
           'printStatus': row['print_status'],
-          'createdAt': row['created_at'], // Keep for debug/filering
+          'printJobs': row['print_jobs'] ?? {},
         };
-      }).where((data) {
-        final status = data['printStatus'];
-        if (status == 'failed') return true; // Always show failed
-        
-        // For pending, check grace period (20 seconds)
-        if (status == 'pending') {
-          final createdAtStr = data['createdAt'] as String?;
-          if (createdAtStr != null) {
-            final createdAt = DateTime.tryParse(createdAtStr);
-            if (createdAt != null) {
-              final diff = DateTime.now().difference(createdAt);
-              if (diff.inSeconds < 20) {
-                 return false; // Hide if within 20s
-              }
-            }
-          }
-        }
-        return true;
       }).toList();
     } catch (e) {
       print("Error fetching failed print items: $e");
@@ -190,12 +258,12 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
           .from('order_groups')
           .select('id, table_names, color_index')
           .eq('shop_id', shopId)
-          .eq('status', 'dining');
+          .eq('status', OrderingConstants.orderStatusDining);
 
       final Set<int> allUsedColors = {};
       final Set<int> nearbyUsedColors = {}; // 鄰桌禁用的顏色
       
-      const double neighborDistanceThreshold = 250.0; // 鄰居判定距離 (pixels)
+      const double neighborDistanceThreshold = 150.0; // 鄰居判定距離 (pixels)
 
       for (var row in activeOrdersRes) {
          if (row['color_index'] == null) continue;
@@ -230,7 +298,7 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
       List<int> availableP1 = []; // P1: 全店完全沒人用過
       List<int> availableP2 = []; // P2: 有人過，但絕對不在鄰桌禁用名單 (非鄰居)
       
-      for (int i = 0; i < 20; i++) {
+      for (int i = 0; i < 9; i++) {
          if (!allUsedColors.contains(i)) {
             availableP1.add(i);
          } else if (!nearbyUsedColors.contains(i)) {
@@ -248,11 +316,11 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
          assignedColorIndex = availableP2.first;
       } else {
          // P3: 極端情況 (整間店完全塞滿，且所有 20 個顏色都在鄰座出現...) -> Fallback 隨機
-         assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 20;
+         assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 9;
       }
     } catch (e) {
       // 若查詢出錯，退到原本的安全亂數
-      assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 20;
+      assignedColorIndex = DateTime.now().millisecondsSinceEpoch % 9;
       print("Color assignment fallback error: $e");
     }
 
@@ -291,7 +359,7 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
     final res = await supabaseClient.from('order_groups').insert({
       'shop_id': shopId,
       'table_names': tableNames,
-      'status': 'dining',
+      'status': OrderingConstants.orderStatusDining,
       'color_index': assignedColorIndex,
       'open_id': currentOpenId,
       'tax_snapshot': taxSnapshot,
@@ -402,7 +470,7 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
   Future<void> updateOrderItemStatus(String itemId, String status) async {
     // 1. If cancelling, try to append timestamp to Note (Fallback for Schema Cache issue)
     String? newNote;
-    if (status == 'cancelled') {
+    if (status == OrderingConstants.orderStatusCancelled) {
         // ... (note fetching logic skipped for brevity, assumed context is enough?) 
         // No, I must include full logic if I replace the whole block.
         // Wait, replace_content requires full replacement of the range.
@@ -457,5 +525,307 @@ class OrderingRemoteDataSourceImpl implements OrderingRemoteDataSource {
           print("Critical Error: Update failed with item_id too: $e2");
        }
     }
+  }
+
+  @override
+  Future<void> splitOrderGroup({
+    required String sourceGroupId,
+    required Map<String, int> itemQuantitiesToMove,
+    required List<String> targetTableNames,
+    String? existingTargetGroupId,
+  }) async {
+    String newGroupId;
+
+    if (existingTargetGroupId != null && existingTargetGroupId.isNotEmpty) {
+      newGroupId = existingTargetGroupId;
+    } else {
+      // 1. Create New Group matching Source
+      final sourceGroup = await supabaseClient.from('order_groups').select().eq('id', sourceGroupId).single();
+
+      final newGroupRes = await supabaseClient.from('order_groups').insert({
+        'shop_id': sourceGroup['shop_id'],
+        'table_names': targetTableNames,
+        'status': OrderingConstants.orderStatusDining,
+        'pax': 1,
+        'note': '拆單 (來自 ${sourceGroupId.substring(0,4)})',
+        'color_index': DateTime.now().millisecondsSinceEpoch % 9,
+        'open_id': sourceGroup['open_id'],
+      }).select('id').single();
+
+      newGroupId = newGroupRes['id'];
+    }
+
+    // Pre-validate all items before any mutation to prevent partial splits
+    for (final entry in itemQuantitiesToMove.entries) {
+      final row = await supabaseClient
+          .from('order_items')
+          .select('quantity')
+          .eq('id', entry.key)
+          .maybeSingle();
+      if (row == null) throw Exception('品項 ${entry.key} 不存在，無法拆單');
+      final existing = (row['quantity'] as num).toInt();
+      if (entry.value > existing) throw Exception('拆出數量 (${entry.value}) 超過現有數量 ($existing)');
+    }
+
+    for (final entry in itemQuantitiesToMove.entries) {
+      final rawId = entry.key;
+      final qtyToMove = entry.value;
+
+      // Fetch actual item to check existing qty
+      final rows = await supabaseClient
+          .from('order_items')
+          .select('quantity')
+          .eq('id', rawId)
+          .maybeSingle();
+      if (rows == null) continue;
+      final existingQty = (rows['quantity'] as num).toInt();
+
+      if (qtyToMove >= existingQty) {
+        // Move whole row
+        await supabaseClient
+            .from('order_items')
+            .update({'order_group_id': newGroupId})
+            .eq('id', rawId);
+      } else {
+        // Partial split: reduce original, insert new row with moved qty
+        await supabaseClient
+            .from('order_items')
+            .update({'quantity': existingQty - qtyToMove})
+            .eq('id', rawId);
+        final original = await supabaseClient
+            .from('order_items')
+            .select()
+            .eq('id', rawId)
+            .single();
+        final newRow = Map<String, dynamic>.from(original);
+        newRow.remove('id');
+        newRow['quantity'] = qtyToMove;
+        newRow['order_group_id'] = newGroupId;
+        await supabaseClient.from('order_items').insert(newRow);
+      }
+    }
+  }
+
+  @override
+  Future<void> revertSplit({
+    required String sourceGroupId,
+    required String targetGroupId,
+  }) async {
+    // Move items back
+    await supabaseClient
+        .from('order_items')
+        .update({'order_group_id': targetGroupId})
+        .eq('order_group_id', sourceGroupId)
+        .neq('status', OrderingConstants.orderStatusCancelled);
+
+    // Cancel source group
+    await supabaseClient
+        .from('order_groups')
+        .update({'status': OrderingConstants.orderStatusCancelled})
+        .eq('id', sourceGroupId);
+  }
+
+  @override
+  Future<void> updateBillingInfo({
+    required String orderGroupId,
+    required double serviceFeeRate,
+    required double discountAmount,
+    required double finalAmount,
+  }) async {
+    await supabaseClient.from('order_groups').update({
+      'service_fee_rate': serviceFeeRate,
+      'discount_amount': discountAmount,
+      'final_amount': finalAmount,
+    }).eq('id', orderGroupId);
+  }
+
+  @override
+  Future<void> moveTable({
+    required String hostGroupId,
+    required List<String> oldTables,
+    required List<String> newTables,
+    int? colorIndex,
+  }) async {
+    final removedTables = oldTables.where((t) => !newTables.contains(t)).toList();
+    final addedTables = newTables.where((t) => !oldTables.contains(t)).toList();
+    
+    if (removedTables.isEmpty) {
+      await supabaseClient
+          .from('order_groups')
+          .update({'table_names': newTables})
+          .eq('id', hostGroupId);
+      return;
+    }
+
+    String targetForTransfer;
+    if (addedTables.isNotEmpty) {
+      targetForTransfer = addedTables.first;
+    } else if (newTables.isNotEmpty) {
+      targetForTransfer = newTables.first;
+    } else {
+       await supabaseClient
+          .from('order_groups')
+          .update({'table_names': newTables})
+          .eq('id', hostGroupId);
+       return;
+    }
+
+    // Collect merged child group tables
+    final mergedChildRes = await supabaseClient
+        .from('order_groups')
+        .select('table_names')
+        .eq('status', OrderingConstants.orderStatusMerged)
+        .eq('merged_target_id', hostGroupId);
+    final mergedChildTables = <String>{};
+    for (final group in mergedChildRes) {
+      final tables = group['table_names'];
+      if (tables is List) {
+        mergedChildTables.addAll(tables.cast<String>());
+      }
+    }
+
+    // Guard: prevent moving host to a merged child's original table
+    final conflicting = newTables.toSet().intersection(mergedChildTables);
+    if (conflicting.isNotEmpty) {
+      throw Exception('無法移動至 ${conflicting.join("、")}，該桌號為已併入子桌。請先拆桌再移動。');
+    }
+
+    for (final removedTable in removedTables) {
+      // Skip tables belonging to merged child groups — preserve their original_table_name
+      if (mergedChildTables.contains(removedTable)) continue;
+
+      await supabaseClient
+          .from('order_items')
+          .update({'original_table_name': targetForTransfer})
+          .eq('order_group_id', hostGroupId)
+          .eq('original_table_name', removedTable);
+    }
+
+    // Handle NULL original_table_name (host's own items inserted before first move)
+    // Mirrors SQLite path: local_db_service.dart moveTableLocal() L1082-1087
+    await supabaseClient
+        .from('order_items')
+        .update({'original_table_name': targetForTransfer})
+        .eq('order_group_id', hostGroupId)
+        .isFilter('original_table_name', null);
+
+    await supabaseClient
+        .from('order_groups')
+        .update({'table_names': newTables})
+        .eq('id', hostGroupId);
+  }
+
+  @override
+  Future<void> mergeOrderGroups({
+    required String hostGroupId,
+    required List<String> targetGroupIds,
+    int? colorIndex,
+  }) async {
+    final hostRes = await supabaseClient
+        .from('order_groups')
+        .select('table_names')
+        .eq('id', hostGroupId)
+        .single();
+    final List<String> currentHostTables = List<String>.from(hostRes['table_names'] ?? []);
+    final Set<String> newHostTables = currentHostTables.toSet();
+
+    for (final targetGroupId in targetGroupIds) {
+      String targetGroupName = 'Unknown';
+      List<String> targetTables = [];
+      try {
+        final groupInfo = await supabaseClient
+            .from('order_groups')
+            .select('table_names')
+            .eq('id', targetGroupId)
+            .single();
+        final List names = groupInfo['table_names'] as List;
+        targetTables = names.map((e) => e.toString()).toList();
+        if (targetTables.isNotEmpty) targetGroupName = targetTables.first;
+      } catch (_) {}
+
+      newHostTables.addAll(targetTables);
+
+      await supabaseClient
+          .from('order_items')
+          .update({'original_table_name': targetGroupName}) 
+          .eq('order_group_id', targetGroupId)
+          .isFilter('original_table_name', null);
+
+      await supabaseClient
+          .from('order_items')
+          .update({'order_group_id': hostGroupId})
+          .eq('order_group_id', targetGroupId);
+      
+      await supabaseClient
+          .from('order_groups')
+          .update({
+            'status': OrderingConstants.orderStatusMerged, 
+            'note': '已併入主單',
+            'merged_target_id': hostGroupId
+          })
+          .eq('id', targetGroupId);
+    }
+    
+    await supabaseClient
+        .from('order_groups')
+        .update({
+          'table_names': newHostTables.toList(),
+          if (colorIndex != null) 'color_index': colorIndex,
+        })
+        .eq('id', hostGroupId);
+  }
+
+  @override
+  Future<void> unmergeOrderGroups({
+    required String hostGroupId,
+    required List<String> targetGroupIds,
+    Map<String, String>? tableOverrides,
+  }) async {
+    final hostRes = await supabaseClient
+        .from('order_groups')
+        .select('table_names')
+        .eq('id', hostGroupId)
+        .single();
+    final List<String> currentHostTables = List<String>.from(hostRes['table_names'] ?? []);
+    final Set<String> newHostTables = currentHostTables.toSet();
+
+    for (final childGroupId in targetGroupIds) {
+      await supabaseClient
+          .from('order_groups')
+          .update({
+            'status': OrderingConstants.orderStatusDining, 
+            'note': null,
+            'merged_target_id': null
+          })
+          .eq('id', childGroupId);
+      
+      final childInfo = await supabaseClient.from('order_groups').select('table_names').eq('id', childGroupId).single();
+      final List names = childInfo['table_names'] as List;
+      final List<String> childTables = names.map((e) => e.toString()).toList();
+
+      newHostTables.removeAll(childTables);
+
+      if (childTables.isNotEmpty) {
+         await supabaseClient
+            .from('order_items')
+            .update({'order_group_id': childGroupId})
+            .eq('order_group_id', hostGroupId)
+            .inFilter('original_table_name', childTables);
+      }
+
+      // If an override table is provided, update child group's table_names
+      final overrideTable = tableOverrides?[childGroupId];
+      if (overrideTable != null) {
+        await supabaseClient
+            .from('order_groups')
+            .update({'table_names': [overrideTable]})
+            .eq('id', childGroupId);
+      }
+    }
+
+    await supabaseClient
+        .from('order_groups')
+        .update({'table_names': newHostTables.toList()})
+        .eq('id', hostGroupId);
   }
 }

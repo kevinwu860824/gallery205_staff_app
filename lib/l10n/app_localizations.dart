@@ -448,6 +448,18 @@ abstract class AppLocalizations {
   /// **'Select Groups'**
   String get scheduleSelectGroups;
 
+  /// No description provided for @scheduleSelectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select All'**
+  String get scheduleSelectAll;
+
+  /// No description provided for @scheduleDeselectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Deselect All'**
+  String get scheduleDeselectAll;
+
   /// No description provided for @commonDone.
   ///
   /// In en, this message translates to:
